@@ -5,6 +5,19 @@ import { renderDashboardPage } from "./ui/pages/dashboard.page";
 import { ensureDefaultGroup, getMembers } from "./services/group.service";
 import { logout } from "./services/auth.service";
 import { renderExpensesPage } from "./ui/pages/expenses.page";
+import { upsertMemberProfile } from "./services/member.service";
+import { EMAIL_TO_MEMBER_ID } from "./config/members.map";
+import { isAdmin } from "./core/roles";
+
+async function ensureMemberProfile() {
+  const memberId = EMAIL_TO_MEMBER_ID[state.user?.email];
+  if (!memberId) return; // email không map -> sẽ bị rules chặn đọc
+
+  await upsertMemberProfile(state.groupId, state.user, {
+    memberId,
+    role: isAdmin(state.user) ? "admin" : "member",
+  });
+}
 
 async function afterLoginSetup(user) {
   try {
@@ -60,3 +73,5 @@ export function startApp() {
   window.addEventListener("hashchange", () => render());
   render();
 }
+
+await ensureMemberProfile();

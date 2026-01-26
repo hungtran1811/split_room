@@ -2,6 +2,7 @@ import {
   loginWithEmail,
   loginWithGoogle,
   registerWithEmail,
+  handleRedirectResult,
 } from "../../services/auth.service";
 
 function el(id) {
@@ -10,6 +11,15 @@ function el(id) {
 
 export function renderLoginPage({ onDone }) {
   const app = document.querySelector("#app");
+  // Handle Google redirect login (mobile)
+  handleRedirectResult()
+    .then((user) => {
+      if (user) {
+        onDone?.();
+      }
+    })
+    .catch(() => {});
+
   app.innerHTML = `
     <div class="container py-5" style="max-width: 520px;">
       <h1 class="h4 mb-3">Split Room</h1>
