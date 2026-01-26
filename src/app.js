@@ -10,14 +10,21 @@ import { EMAIL_TO_MEMBER_ID } from "./config/members.map";
 import { isAdmin } from "./core/roles";
 
 async function ensureMemberProfile() {
-  const memberId = EMAIL_TO_MEMBER_ID[state.user?.email];
-  if (!memberId) return; // email không map -> sẽ bị rules chặn đọc
+  const email = state.user?.email || "";
+  const memberId = EMAIL_TO_MEMBER_ID[email];
+
+  if (!memberId) {
+    // Email không map => rules sẽ chặn đọc group (đúng theo thiết kế)
+    throw new Error("Email chưa được gán thành viên trong nhóm.");
+  }
 
   await upsertMemberProfile(state.groupId, state.user, {
     memberId,
     role: isAdmin(state.user) ? "admin" : "member",
   });
 }
+
+await ensureMemberProfile();
 
 async function afterLoginSetup(user) {
   try {
@@ -73,5 +80,3 @@ export function startApp() {
   window.addEventListener("hashchange", () => render());
   render();
 }
-
-await ensureMemberProfile();
