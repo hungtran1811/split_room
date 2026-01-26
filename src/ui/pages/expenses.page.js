@@ -25,6 +25,26 @@ import { renderMatrixTable } from "../components/matrixTable";
 function $(id) {
   return document.getElementById(id);
 }
+function creatorLabel(uid) {
+  if (!uid) return "-";
+
+  // ưu tiên lấy từ members trong group (nếu bạn có lưu displayName/email)
+  const m = (state.members || []).find((x) => x.uid === uid || x.id === uid);
+  if (m) {
+    const name = (m.displayName || m.name || m.email || "User").trim();
+    const email = (m.email || "").trim();
+    return email ? `${name} (${email})` : name;
+  }
+
+  // fallback: nếu là chính mình
+  if (state.user?.uid === uid) {
+    const name = (state.user.displayName || state.user.email || "Bạn").trim();
+    const email = (state.user.email || "").trim();
+    return email ? `${name} (${email})` : name;
+  }
+
+  return uid; // fallback cuối
+}
 
 // Nhập VNĐ: chấp nhận 10000, 10.000, 10,5, 10.000,5
 function parseVndInput(s) {
@@ -404,6 +424,9 @@ export async function renderExpensesPage() {
               <div>
                 <div class="fw-semibold">${e.date} • ${formatVND(e.amount)}</div>
                 <div class="text-secondary">Người trả: <b>${nameOf(e.payerId)}</b>${e.note ? ` • ${e.note}` : ""}</div>
+                <div class="text-secondary small">
+                  Người tạo: <b>${creatorLabel(e.createdBy)}</b>
+                </div>
                 <div class="small text-secondary mt-1">
                   Nợ: ${
                     Object.entries(e.debts || {}).length

@@ -28,22 +28,25 @@ function getMonthRange(period) {
 
 // ===== Helpers: roster & name =====
 function getRoster() {
-  // ưu tiên members từ Firestore (phase 2)
-  const ms = state.members || [];
-  if (ms.length) {
-    return ms.map((m) => ({
-      id: m.id, // bạn đang lưu id member trong doc member
-      name: m.displayName || m.email || m.id,
-    }));
-  }
-
-  // fallback nếu chưa load members
-  return [
+  const base = [
     { id: "hung", name: "Hưng" },
     { id: "thao", name: "Thảo" },
     { id: "thinh", name: "Thịnh" },
     { id: "thuy", name: "Thùy" },
   ];
+
+  const ms = state.members || [];
+  if (!ms.length) return base;
+
+  // Nếu members có memberId đúng, ưu tiên lấy displayName/email để hiển thị đẹp
+  return base.map((x) => {
+    const m = ms.find((z) => z.memberId === x.id);
+    if (!m) return x;
+    return {
+      id: x.id, // ✅ GIỮ ID CHUẨN để khớp payerId/debts
+      name: m.displayName || m.email || x.name,
+    };
+  });
 }
 
 function nameOf(id, roster) {
@@ -224,11 +227,7 @@ export function renderDashboardPage() {
             <label class="form-label small mb-1">Chọn tháng</label>
             <input id="periodPicker" type="month" class="form-control" value="${period}" />
           </div>
-          <div class="col-6 col-md-8">
-            <div class="small text-secondary">
-              Dashboard này chỉ hiển thị: <b>Ma trận còn phải trả</b> và <b>Kết quả cấn trừ</b>.
-            </div>
-          </div>
+
         </div>
 
         <div class="card">
