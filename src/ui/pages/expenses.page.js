@@ -414,7 +414,7 @@ export async function renderExpensesPage() {
                   }
                 </div>
               </div>
-              <button class="btn btn-outline-danger btn-sm" data-del="${e.id}">Xoá</button>
+              ${admin ? `<button class="btn btn-outline-danger btn-sm" data-del="${e.id}">Xoá</button>` : ``}
             </div>
           </div>
         `,

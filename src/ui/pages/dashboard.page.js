@@ -188,12 +188,6 @@ export function renderDashboardPage() {
   let livePayments = [];
 
   function renderView(settle, settleMatrix) {
-    const matrixHtml = renderMatrixTable({
-      members: roster.map((x) => ({ id: x.id, name: x.name })),
-      matrix: settleMatrix,
-      title: "Ma trận còn phải trả (sau cấn trừ)",
-    });
-
     const settleHtml =
       settle.length > 0
         ? settle
@@ -234,13 +228,6 @@ export function renderDashboardPage() {
             <div class="small text-secondary">
               Dashboard này chỉ hiển thị: <b>Ma trận còn phải trả</b> và <b>Kết quả cấn trừ</b>.
             </div>
-          </div>
-        </div>
-
-        <div class="card mb-3">
-          <div class="card-header">Ma trận</div>
-          <div class="card-body">
-            ${matrixHtml}
           </div>
         </div>
 
