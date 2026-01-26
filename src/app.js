@@ -5,26 +5,6 @@ import { renderDashboardPage } from "./ui/pages/dashboard.page";
 import { ensureDefaultGroup, getMembers } from "./services/group.service";
 import { logout } from "./services/auth.service";
 import { renderExpensesPage } from "./ui/pages/expenses.page";
-import { upsertMemberProfile } from "./services/member.service";
-import { EMAIL_TO_MEMBER_ID } from "./config/members.map";
-import { isAdmin } from "./core/roles";
-
-async function ensureMemberProfile() {
-  const email = state.user?.email || "";
-  const memberId = EMAIL_TO_MEMBER_ID[email];
-
-  if (!memberId) {
-    // Email không map => rules sẽ chặn đọc group (đúng theo thiết kế)
-    throw new Error("Email chưa được gán thành viên trong nhóm.");
-  }
-
-  await upsertMemberProfile(state.groupId, state.user, {
-    memberId,
-    role: isAdmin(state.user) ? "admin" : "member",
-  });
-}
-
-await ensureMemberProfile();
 
 async function afterLoginSetup(user) {
   try {
@@ -40,8 +20,7 @@ async function afterLoginSetup(user) {
 }
 
 function getRoute() {
-  const h = window.location.hash || "#/dashboard";
-  return h;
+  return window.location.hash || "#/dashboard";
 }
 
 async function render() {
@@ -51,7 +30,6 @@ async function render() {
   }
 
   const route = getRoute();
-
   if (route.startsWith("#/expenses")) {
     await renderExpensesPage();
   } else {
@@ -64,11 +42,7 @@ export function startApp() {
     setUser(user);
 
     if (user) {
-      try {
-        await afterLoginSetup(user);
-      } catch (e) {
-        console.error("Setup error:", e);
-      }
+      await afterLoginSetup(user);
     } else {
       setGroup(null);
       setMembers([]);
