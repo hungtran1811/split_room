@@ -387,6 +387,9 @@ export async function renderExpensesPage() {
     if (sumDebts - amount > 0.000001)
       return setMsg("Tổng nợ của người khác không được lớn hơn tổng tiền.");
 
+    const btn = $("btnSaveExpense");
+    btn.disabled = true;
+    btn.textContent = "Đang lưu...";
     try {
       await addExpense(groupId, {
         date,
@@ -398,12 +401,34 @@ export async function renderExpensesPage() {
         createdBy: state.user.uid,
       });
 
+      // reset form
       $("exAmount").value = "";
       $("exNote").value = "";
       setMsg("");
+
+      // ✅ Toast thành công
+      showToast({
+        title: "Thành công",
+        message: "Đã lưu khoản chi.",
+        variant: "success",
+      });
+
+      // (tuỳ chọn) cập nhật lại debts box cho sạch số
+      renderDebtsInputs();
     } catch (e) {
       console.error(e);
       setMsg(e?.message || "Lưu thất bại.");
+
+      // ✅ Toast thất bại
+      showToast({
+        title: "Thất bại",
+        message: e?.message || "Không thể lưu khoản chi.",
+        variant: "danger",
+      });
+    } finally {
+      const btn = $("btnSaveExpense");
+      btn.disabled = false;
+      btn.textContent = "Lưu chi tiêu";
     }
   };
 
