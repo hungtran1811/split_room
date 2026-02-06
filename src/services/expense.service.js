@@ -8,6 +8,7 @@ import {
   deleteDoc,
   doc,
   serverTimestamp,
+  updateDoc,
 } from "firebase/firestore";
 
 import { onSnapshot, where } from "firebase/firestore";
@@ -68,5 +69,13 @@ export function watchExpensesByRange(groupId, startDate, endDate, onChange) {
   return onSnapshot(q, (snap) => {
     const items = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
     onChange(items);
+  });
+}
+
+export async function updateExpense(groupId, expenseId, patch) {
+  const ref = doc(db, "groups", groupId, "expenses", expenseId);
+  await updateDoc(ref, {
+    ...patch,
+    updatedAt: serverTimestamp(),
   });
 }

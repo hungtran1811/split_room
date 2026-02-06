@@ -8,7 +8,7 @@ import {
   deleteDoc,
   doc,
   serverTimestamp,
-  Timestamp,
+  updateDoc,
 } from "firebase/firestore";
 import { onSnapshot, where } from "firebase/firestore";
 
@@ -69,5 +69,13 @@ export function watchPaymentsByRange(groupId, start, end, cb) {
       ...d.data(),
     }));
     cb(items);
+  });
+}
+
+export async function updatePayment(groupId, paymentId, patch) {
+  const ref = doc(db, "groups", groupId, "payments", paymentId);
+  await updateDoc(ref, {
+    ...patch,
+    updatedAt: serverTimestamp(),
   });
 }

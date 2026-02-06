@@ -15,6 +15,7 @@ import {
   addPayment,
   removePayment,
   watchPaymentsByRange,
+  updatePayment,
 } from "../../services/payment.service";
 
 import { buildGrossMatrix } from "../../engine/grossMatrix";
@@ -257,6 +258,10 @@ export async function renderExpensesPage() {
 
   const btnToggle = document.getElementById("btnToggleExpenses");
   const wrap = document.getElementById("expensesListWrap");
+  // scroll trong khung danh sách chi tiêu
+  wrap.style.maxHeight = "400px";
+  wrap.style.overflowY = "auto";
+  wrap.style.overflowX = "hidden";
 
   btnToggle?.addEventListener("click", () => {
     expensesCollapsed = !expensesCollapsed;
@@ -469,6 +474,7 @@ export async function renderExpensesPage() {
                 </div>
               </div>
               ${admin ? `<button class="btn btn-outline-danger btn-sm" data-del="${e.id}">Xoá</button>` : ``}
+              
             </div>
           </div>
         `,
@@ -531,7 +537,10 @@ export async function renderExpensesPage() {
                 <div class="fw-semibold">${p.date} • ${nameOf(p.fromId)} → ${nameOf(p.toId)} • ${formatVND(p.amount)}</div>
                 <div class="text-secondary small">${p.note ? p.note : ""}</div>
               </div>
-              <button class="btn btn-outline-danger btn-sm" data-delpay="${p.id}">Xoá</button>
+              <div class="d-flex gap-2">
+                ${admin ? `<button class="btn btn-outline-secondary btn-sm" data-editpay="${p.id}">Sửa</button>` : ``}
+                ${admin ? `<button class="btn btn-outline-danger btn-sm" data-delpay="${p.id}">Xoá</button>` : ``}
+              </div>
             </div>
           </div>
         `,
@@ -569,6 +578,40 @@ export async function renderExpensesPage() {
               });
               throw err;
             }
+          },
+        });
+      };
+    });
+
+    wrap.querySelectorAll("[data-editpay]").forEach((btn) => {
+      btn.onclick = async () => {
+        const id = btn.getAttribute("data-editpay");
+        const p = payments.find((x) => x.id === id);
+        if (!p) return;
+
+        // ✅ mở modal (tái sử dụng)
+        openPaymentModal({
+          title: "Sửa thanh toán",
+          fromName: nameOf(p.fromId),
+          toName: nameOf(p.toId),
+          amount: Number(p.amount || 0),
+          lockAmount: false,
+          maxAmount: null,
+          defaultNote: p.note || "",
+          parseVndInput,
+          onSubmit: async ({ amount: amt, note }) => {
+            await updatePayment(state.groupId, id, {
+              amount: amt,
+              note: note || "",
+              // ✅ Nếu bạn muốn cho sửa ngày thì thêm UI khác,
+              // còn hiện tại giữ nguyên p.date
+            });
+
+            showToast({
+              title: "Thành công",
+              message: "Đã cập nhật thanh toán.",
+              variant: "success",
+            });
           },
         });
       };
