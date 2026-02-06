@@ -25,6 +25,12 @@ import { renderMatrixTable } from "../components/matrixTable";
 function $(id) {
   return document.getElementById(id);
 }
+
+function periodToYmd(period) {
+  // period: "YYYY-MM" -> "YYYY-MM-01"
+  return `${period}-01`;
+}
+
 function creatorLabel(uid) {
   if (!uid) return "-";
 
@@ -816,7 +822,7 @@ export async function renderExpensesPage() {
 
   async function createPayment(fromId, toId, amount, note) {
     const groupId = state.groupId;
-    const date = todayYmd();
+    const date = periodToYmd(selectedPeriod);
 
     try {
       await addPayment(groupId, {
