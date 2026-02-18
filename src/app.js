@@ -161,6 +161,9 @@ async function render() {
 // APP START
 // ===============================
 export function startApp() {
+  if (!window.location.hash || window.location.hash === "#") {
+    window.location.hash = "#/dashboard";
+  }
   // 1) Vừa vào app luôn render loading trước (giống ht)
   renderBootScreen();
 

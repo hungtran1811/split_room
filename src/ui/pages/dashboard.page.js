@@ -472,7 +472,7 @@ export function renderDashboardPage() {
     const groupId = state.groupId;
 
     _unsubExpenses = watchExpensesByRange(groupId, start, end, (items) => {
-      if (!location.hash.startsWith("#/dashboard")) return;
+      if (!document.body.contains(app)) return;
 
       liveExpenses = items;
       gotExpenses = true;
@@ -481,7 +481,7 @@ export function renderDashboardPage() {
     });
 
     _unsubPayments = watchPaymentsByRange(groupId, start, end, (items) => {
-      if (!location.hash.startsWith("#/dashboard")) return;
+      if (!document.body.contains(app)) return;
 
       livePayments = items;
       gotPayments = true;
@@ -490,8 +490,6 @@ export function renderDashboardPage() {
     });
   }
 
-  // init
-  startWatch();
   // ✅ auto cleanup when leaving expenses page
   // ✅ auto cleanup when leaving dashboard page
   const onHashChange = () => {
