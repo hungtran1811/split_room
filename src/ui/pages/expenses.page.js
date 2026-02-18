@@ -5,10 +5,12 @@ import { isAdmin } from "../../core/roles";
 import { openPaymentModal } from "../components/paymentModal";
 import { showToast } from "../components/toast";
 import { openConfirmModal } from "../components/confirmModal";
+import { openExpenseEditModal } from "../components/expenseEditModal";
 
 import {
   addExpense,
   removeExpense,
+  updateExpense,
   watchExpensesByRange,
 } from "../../services/expense.service";
 import {
@@ -473,7 +475,17 @@ export async function renderExpensesPage() {
                   }
                 </div>
               </div>
-              ${admin ? `<button class="btn btn-outline-danger btn-sm" data-del="${e.id}">Xoá</button>` : ``}
+              ${
+                admin
+                  ? `
+                    <div class="d-flex gap-2">
+                      <button class="btn btn-outline-secondary btn-sm" data-editex="${e.id}">Sửa</button>
+                      <button class="btn btn-outline-danger btn-sm" data-del="${e.id}">Xoá</button>
+                    </div>
+                  `
+                  : ``
+              }
+
               
             </div>
           </div>
@@ -513,6 +525,29 @@ export async function renderExpensesPage() {
               });
               throw err;
             }
+          },
+        });
+      };
+    });
+
+    wrap.querySelectorAll("[data-editex]").forEach((btn) => {
+      btn.onclick = async () => {
+        const id = btn.getAttribute("data-editex");
+        const e = expenses.find((x) => x.id === id);
+        if (!e) return;
+
+        openExpenseEditModal({
+          title: "Sửa chi tiêu (ngày/ghi chú)",
+          date: e.date,
+          note: e.note || "",
+          onSubmit: async ({ date, note }) => {
+            await updateExpense(state.groupId, id, { date, note });
+
+            showToast({
+              title: "Thành công",
+              message: "Đã cập nhật chi tiêu.",
+              variant: "success",
+            });
           },
         });
       };

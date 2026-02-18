@@ -6,6 +6,7 @@ import { EMAIL_TO_MEMBER_ID } from "../../config/members.map";
 
 import { watchExpensesByRange } from "../../services/expense.service";
 import { watchPaymentsByRange } from "../../services/payment.service";
+import { watchRentByPeriod } from "../../services/rent.service";
 
 // ===== Helpers: period =====
 function currentPeriod() {
@@ -13,6 +14,11 @@ function currentPeriod() {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
   return `${y}-${m}`; // YYYY-MM
+}
+
+function clampPct(x) {
+  if (!Number.isFinite(x)) return 0;
+  return Math.max(0, Math.min(100, x));
 }
 
 function getMonthRange(period) {
@@ -173,6 +179,7 @@ function buildSettleMatrix(memberIds, settle) {
 // ===== realtime unsub holders =====
 let _unsubExpenses = null;
 let _unsubPayments = null;
+let _unsubRent = null;
 
 export function renderDashboardPage() {
   const app = document.querySelector("#app");
@@ -185,6 +192,10 @@ export function renderDashboardPage() {
     _unsubPayments();
     _unsubPayments = null;
   }
+  if (_unsubRent) {
+    _unsubRent();
+    _unsubRent = null;
+  }
 
   const email = state.user?.email || "Unknown";
 
@@ -195,6 +206,67 @@ export function renderDashboardPage() {
   let period = currentPeriod();
   let liveExpenses = [];
   let livePayments = [];
+  let liveRent = null;
+
+  function getMyMemberId() {
+    const email = state.user?.email || "";
+    return EMAIL_TO_MEMBER_ID[email] || null;
+  }
+
+  function computeMyRentSummary(rentDoc) {
+    const myId = getMyMemberId();
+    if (!rentDoc || !myId) return null;
+
+    const payerId = rentDoc.payerId || "hung"; // fallback nếu bạn không lưu payerId
+    const shares = rentDoc.shares || {};
+    const paid = rentDoc.paid || {};
+
+    // tổng tiền tháng
+    const total = Number(rentDoc.total || 0);
+
+    // nếu là người trả chủ nhà (Hưng)
+    if (myId === payerId) {
+      const myShare = Number(shares[payerId] || 0);
+
+      // chỉ thu từ 3 người còn lại (không tính phần Hưng)
+      const expectedFromOthers = Math.max(0, total - myShare);
+
+      const collectedFromOthers = Object.entries(paid).reduce(
+        (sum, [id, val]) => {
+          if (id === payerId) return sum; // ✅ bỏ qua Hưng
+          return sum + Number(val || 0);
+        },
+        0,
+      );
+
+      const remainToCollect = Math.max(
+        0,
+        expectedFromOthers - collectedFromOthers,
+      );
+
+      return {
+        mode: "payer",
+        total,
+        myShare,
+        expectedFromOthers,
+        collectedFromOthers,
+        remainToCollect,
+      };
+    }
+
+    // người bình thường: phải đóng - đã chuyển
+    const mustPay = Number(shares[myId] || 0);
+    const alreadyPaid = Number(paid[myId] || 0);
+    const remain = Math.max(0, mustPay - alreadyPaid);
+
+    return {
+      mode: "member",
+      mustPay,
+      alreadyPaid,
+      remain,
+    };
+  }
+
   let onlyMine = true;
   let personFilter = "all";
   let gotExpenses = false;
@@ -247,7 +319,7 @@ export function renderDashboardPage() {
     };
   }
 
-  function renderView(settle, settleMatrix) {
+  function renderView(settle, settleMatrix, rentSum) {
     // ====== áp filter cho danh sách settle ======
     let filtered = [...(settle || [])];
 
@@ -325,6 +397,131 @@ export function renderDashboardPage() {
         .join("");
     };
 
+    let rentBoxHtml = "";
+    if (rentSum) {
+      if (rentSum.mode === "payer") {
+        const pct = clampPct(
+          rentSum.expectedFromOthers <= 0
+            ? 100
+            : (rentSum.collectedFromOthers / rentSum.expectedFromOthers) * 100,
+        );
+
+        const badge =
+          rentSum.remainToCollect <= 0
+            ? `<span class="badge bg-success">ĐÃ THU ĐỦ</span>`
+            : `<span class="badge bg-warning text-dark">CÒN THIẾU ${formatVND(rentSum.remainToCollect)}</span>`;
+
+        rentBoxHtml = `
+      <div class="card mb-3">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <b>Tiền nhà tháng này</b>
+          <div class="d-flex align-items-center gap-2">
+            ${badge}
+            <a class="btn btn-outline-secondary btn-sm" href="#/rent">Mở</a>
+          </div>
+        </div>
+
+        <div class="card-body">
+          <div class="text-secondary small mb-2">Bạn là người trả.</div>
+
+          <div class="row g-3">
+            <div class="col-12 col-md-4">
+              <div class="text-secondary small">Phần của bạn</div>
+              <div class="fw-semibold fs-5">${formatVND(rentSum.myShare)}</div>
+            </div>
+
+            <div class="col-12 col-md-8">
+              <div class="d-flex justify-content-between small text-secondary">
+                <span>Tiến độ thu tiền</span>
+                <span>${Math.round(pct)}%</span>
+              </div>
+
+              <div class="progress" style="height: 10px;">
+                <div class="progress-bar ${rentSum.remainToCollect <= 0 ? "bg-success" : "bg-warning"}"
+                     role="progressbar"
+                     style="width:${pct}%"
+                     aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100"></div>
+              </div>
+
+              <div class="row mt-3 text-center">
+                <div class="col">
+                  <div class="text-secondary small">Cần thu</div>
+                  <div class="fw-semibold">${formatVND(rentSum.expectedFromOthers)}</div>
+                </div>
+                <div class="col">
+                  <div class="text-secondary small">Đã thu</div>
+                  <div class="fw-semibold text-success">${formatVND(rentSum.collectedFromOthers)}</div>
+                </div>
+                <div class="col">
+                  <div class="text-secondary small">Còn thiếu</div>
+                  <div class="fw-semibold ${rentSum.remainToCollect <= 0 ? "text-success" : "text-danger"}">
+                    ${formatVND(rentSum.remainToCollect)}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    `;
+      } else {
+        const pct = clampPct(
+          rentSum.mustPay <= 0
+            ? 100
+            : (rentSum.alreadyPaid / rentSum.mustPay) * 100,
+        );
+
+        const badge =
+          rentSum.remain <= 0
+            ? `<span class="badge bg-success">ĐÃ XONG</span>`
+            : `<span class="badge bg-danger">CÒN THIẾU ${formatVND(rentSum.remain)}</span>`;
+
+        rentBoxHtml = `
+      <div class="card mb-3">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <b>Tiền nhà tháng này</b>
+          <div class="d-flex align-items-center gap-2">
+            ${badge}
+            <a class="btn btn-outline-secondary btn-sm" href="#/rent">Mở</a>
+          </div>
+        </div>
+
+        <div class="card-body">
+          <div class="d-flex justify-content-between small text-secondary">
+            <span>Tiến độ đóng tiền</span>
+            <span>${Math.round(pct)}%</span>
+          </div>
+
+          <div class="progress" style="height: 10px;">
+            <div class="progress-bar ${rentSum.remain <= 0 ? "bg-success" : "bg-danger"}"
+                 role="progressbar"
+                 style="width:${pct}%"
+                 aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100"></div>
+          </div>
+
+          <div class="row mt-3 text-center">
+            <div class="col">
+              <div class="text-secondary small">Bạn cần trả</div>
+              <div class="fw-semibold">${formatVND(rentSum.mustPay)}</div>
+            </div>
+            <div class="col">
+              <div class="text-secondary small">Đã chuyển</div>
+              <div class="fw-semibold text-success">${formatVND(rentSum.alreadyPaid)}</div>
+            </div>
+            <div class="col">
+              <div class="text-secondary small">Còn thiếu</div>
+              <div class="fw-semibold ${rentSum.remain <= 0 ? "text-success" : "text-danger"}">
+                ${formatVND(rentSum.remain)}
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    `;
+      }
+    }
     app.innerHTML = `
     <div class="container py-4" style="max-width: 980px;">
       <div class="d-flex justify-content-between align-items-center mb-3">
@@ -336,6 +533,7 @@ export function renderDashboardPage() {
 
         <div class="d-flex gap-2">
           <a class="btn btn-outline-primary btn-sm" href="#/expenses">Chi tiêu</a>
+          <a class="btn btn-outline-secondary btn-sm" href="#/rent">Tiền nhà</a>
           <button id="btnLogout" class="btn btn-outline-danger btn-sm">${t("logout")}</button>
         </div>
       </div>
@@ -368,6 +566,8 @@ export function renderDashboardPage() {
           </select>
         </div>
       </div>
+
+      ${rentBoxHtml}
 
       <div class="row g-2 mb-3">
         <div class="col-12 col-md-6">
@@ -413,7 +613,10 @@ export function renderDashboardPage() {
 
     document.getElementById("periodPicker").onchange = (e) => {
       period = e.target.value || currentPeriod();
+      gotExpenses = false;
+      gotPayments = false;
       startWatch();
+      renderLoadingView();
     };
 
     document.getElementById("onlyMine")?.addEventListener("change", (e) => {
@@ -461,12 +664,14 @@ export function renderDashboardPage() {
     }
     const settle = settleDebts(balances);
     const settleMatrix = buildSettleMatrix(memberIds, settle);
-    renderView(settle, settleMatrix);
+    const rentSum = computeMyRentSummary(liveRent); // ✅ THÊM
+    renderView(settle, settleMatrix, rentSum);
   }
 
   function startWatch() {
     if (_unsubExpenses) _unsubExpenses();
     if (_unsubPayments) _unsubPayments();
+    if (_unsubRent) _unsubRent();
 
     const { start, end } = getMonthRange(period);
     const groupId = state.groupId;
@@ -488,10 +693,15 @@ export function renderDashboardPage() {
 
       recomputeAndRender();
     });
+
+    _unsubRent = watchRentByPeriod(groupId, period, (doc) => {
+      if (!document.body.contains(app)) return;
+      liveRent = doc;
+      recomputeAndRender(); // để rentBox update realtime
+    });
   }
 
   // ✅ auto cleanup when leaving expenses page
-  // ✅ auto cleanup when leaving dashboard page
   const onHashChange = () => {
     if (!location.hash.startsWith("#/dashboard")) {
       if (_unsubExpenses) {
@@ -502,6 +712,11 @@ export function renderDashboardPage() {
         _unsubPayments();
         _unsubPayments = null;
       }
+      if (_unsubRent) {
+        _unsubRent();
+        _unsubRent = null;
+      } // ✅ THÊM
+
       window.removeEventListener("hashchange", onHashChange);
     }
   };

@@ -10,6 +10,7 @@ import { ensureDefaultGroup, getMembers } from "./services/group.service";
 import { upsertMemberProfile } from "./services/member.service";
 import { EMAIL_TO_MEMBER_ID } from "./config/members.map";
 import { isAdmin } from "./core/roles";
+import { renderRentPage } from "./ui/pages/rent.page";
 
 // ===============================
 // APP BOOT STATE
@@ -148,10 +149,12 @@ async function render() {
     return;
   }
 
-  // ✅ Giữ route khi refresh (hash vẫn giữ nguyên)
   const route = getRoute();
+
   if (route.startsWith("#/expenses")) {
     await renderExpensesPage();
+  } else if (route.startsWith("#/rent")) {
+    await renderRentPage();
   } else {
     renderDashboardPage();
   }
