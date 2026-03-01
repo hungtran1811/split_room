@@ -19,6 +19,7 @@ export async function upsertMemberProfile(
   { memberId, role = "member" },
 ) {
   const ref = doc(db, "groups", groupId, "members", user.uid);
+  const current = await getDoc(ref);
 
   await setDoc(
     ref,
@@ -30,7 +31,9 @@ export async function upsertMemberProfile(
       memberId, // ✅ quan trọng
       role, // ✅ admin/member
       updatedAt: serverTimestamp(),
-      createdAt: serverTimestamp(),
+      createdAt: current.exists()
+        ? current.data()?.createdAt || serverTimestamp()
+        : serverTimestamp(),
     },
     { merge: true },
   );
@@ -41,6 +44,8 @@ export async function getMyMemberProfile(groupId, uid) {
   const snap = await getDoc(ref);
   return snap.exists() ? { id: snap.id, ...snap.data() } : null;
 }
+
+export const getCurrentMemberProfile = getMyMemberProfile;
 
 /** Watch profile của chính mình (để set state.memberId) */
 export function watchMyMemberProfile(groupId, uid, cb) {

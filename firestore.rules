@@ -1,0 +1,155 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function authEmail() {
+      return request.auth.token.email;
+    }
+
+    function allowedEmails() {
+      return [
+        "hungtran00.nt@gmail.com",
+        "thanhthuyhuynh1712@gmail.com",
+        "huynhnhatthinh.2003@gmail.com",
+        "huynhthanhthao14062001@gmail.com"
+      ];
+    }
+
+    function isAllowedEmail() {
+      return signedIn() && authEmail() in allowedEmails();
+    }
+
+    function memberDocPath(groupId, uid) {
+      return /databases/$(database)/documents/groups/$(groupId)/members/$(uid);
+    }
+
+    function memberDoc(groupId, uid) {
+      return get(memberDocPath(groupId, uid));
+    }
+
+    function isGroupMember(groupId) {
+      return signedIn()
+        && isAllowedEmail()
+        && exists(memberDocPath(groupId, request.auth.uid));
+    }
+
+    function isGroupAdmin(groupId) {
+      return isGroupMember(groupId)
+        && memberDoc(groupId, request.auth.uid).data.role == "admin";
+    }
+
+    function periodRegex() {
+      return '^\\d{4}-\\d{2}$';
+    }
+
+    function validRole(role) {
+      return role in ["admin", "member"];
+    }
+
+    function rentAllowedKeys() {
+      return [
+        "period",
+        "payerId",
+        "items",
+        "total",
+        "headcount",
+        "water",
+        "electric",
+        "computed",
+        "splitMode",
+        "shares",
+        "paid",
+        "note",
+        "status",
+        "finalizedAt",
+        "finalizedBy",
+        "createdBy",
+        "createdAt",
+        "updatedAt"
+      ];
+    }
+
+    function validRentShape(rentId) {
+      return request.resource.data.keys().hasOnly(rentAllowedKeys())
+        && request.resource.data.period is string
+        && request.resource.data.period.matches(periodRegex())
+        && request.resource.data.period == rentId
+        && request.resource.data.payerId is string
+        && request.resource.data.items is map
+        && request.resource.data.total is number
+        && request.resource.data.total >= 0
+        && request.resource.data.headcount is number
+        && request.resource.data.headcount >= 0
+        && request.resource.data.water is map
+        && request.resource.data.electric is map
+        && request.resource.data.computed is map
+        && request.resource.data.splitMode in ["equal", "custom"]
+        && request.resource.data.shares is map
+        && request.resource.data.paid is map
+        && (!request.resource.data.keys().hasAny(["status"])
+          || request.resource.data.status in ["draft", "finalized"]);
+    }
+
+    function validPeriodWrite(groupId, periodId) {
+      return isGroupAdmin(groupId)
+        && request.resource.data.period is string
+        && request.resource.data.period.matches(periodRegex())
+        && request.resource.data.period == periodId;
+    }
+
+    match /groups/{groupId} {
+      allow read: if isAllowedEmail();
+      allow create: if isAllowedEmail();
+      allow update, delete: if isGroupAdmin(groupId);
+
+      match /members/{uid} {
+        allow read: if isGroupMember(groupId)
+          || (signedIn() && isAllowedEmail() && request.auth.uid == uid);
+        allow create: if isAllowedEmail()
+          && request.auth.uid == uid
+          && request.resource.data.uid == uid
+          && request.resource.data.memberId is string
+          && request.resource.data.email is string
+          && validRole(request.resource.data.role);
+        allow update: if isGroupAdmin(groupId)
+          || (request.auth.uid == uid
+            && request.resource.data.uid == uid
+            && request.resource.data.memberId == resource.data.memberId
+            && request.resource.data.role == resource.data.role);
+        allow delete: if isGroupAdmin(groupId);
+      }
+
+      match /expenses/{expenseId} {
+        allow read: if isGroupMember(groupId);
+        allow create: if isGroupMember(groupId);
+        allow update, delete: if isGroupAdmin(groupId);
+      }
+
+      match /payments/{paymentId} {
+        allow read: if isGroupMember(groupId);
+        allow create, update, delete: if isGroupAdmin(groupId);
+      }
+
+      match /rents/{rentId} {
+        allow read: if isGroupMember(groupId);
+        allow create: if isGroupAdmin(groupId)
+          && validRentShape(rentId)
+          && request.resource.data.createdBy == request.auth.uid;
+        allow update: if isGroupAdmin(groupId)
+          && validRentShape(rentId)
+          && request.resource.data.createdBy == resource.data.createdBy;
+        allow delete: if isGroupAdmin(groupId);
+      }
+
+      match /periods/{periodId} {
+        allow read: if isGroupMember(groupId);
+        allow create, update: if validPeriodWrite(groupId, periodId);
+        allow delete: if isGroupAdmin(groupId);
+      }
+    }
+  }
+}

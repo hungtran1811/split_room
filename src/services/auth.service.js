@@ -1,12 +1,12 @@
 import {
   GoogleAuthProvider,
   createUserWithEmailAndPassword,
+  getRedirectResult,
+  onAuthStateChanged,
   signInWithEmailAndPassword,
   signInWithPopup,
-  signOut,
-  onAuthStateChanged,
   signInWithRedirect,
-  getRedirectResult,
+  signOut,
 } from "firebase/auth";
 import { auth } from "../config/firebase";
 
@@ -45,9 +45,9 @@ export async function resolvePendingGoogleRedirect() {
   try {
     const result = await getRedirectResult(auth);
     return result?.user || null;
-  } catch (e) {
-    console.error("Redirect login failed:", e);
-    throw e;
+  } catch (error) {
+    console.error("Redirect login failed:", error);
+    throw error;
   }
 }
 
@@ -65,7 +65,7 @@ export function getAuthErrorMessage(error) {
   }
 
   if (code.includes("auth/popup-blocked")) {
-    return "Trình duyệt đã chặn popup đăng nhập Google.";
+    return "Trình duyệt đã chặn cửa sổ đăng nhập Google.";
   }
 
   if (code.includes("auth/popup-closed-by-user")) {

@@ -1,728 +1,688 @@
 import { logout } from "../../services/auth.service";
 import { state } from "../../core/state";
-import { renderMatrixTable } from "../components/matrixTable";
 import { t, formatVND } from "../../config/i18n";
+import { ROSTER } from "../../config/roster";
 import { EMAIL_TO_MEMBER_ID } from "../../config/members.map";
-
+import {
+  getCurrentUserLabel,
+  getMemberLabelById,
+} from "../../core/display-name";
 import { watchExpensesByRange } from "../../services/expense.service";
 import { watchPaymentsByRange } from "../../services/payment.service";
 import { watchRentByPeriod } from "../../services/rent.service";
+import { buildGrossMatrix } from "../../engine/grossMatrix";
+import { computeNetBalances } from "../../engine/netBalance";
+import { settleDebts } from "../../engine/settle";
 
-// ===== Helpers: period =====
-function currentPeriod() {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  return `${y}-${m}`; // YYYY-MM
+let unsubscribeExpenses = null;
+let unsubscribePayments = null;
+let unsubscribeRent = null;
+
+function byId(id) {
+  return document.getElementById(id);
 }
 
-function clampPct(x) {
-  if (!Number.isFinite(x)) return 0;
-  return Math.max(0, Math.min(100, x));
+function currentPeriod() {
+  const date = new Date();
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  return `${year}-${month}`;
+}
+
+function clampPercent(value) {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(100, value));
 }
 
 function getMonthRange(period) {
-  const [y, m] = period.split("-").map(Number);
-  const start = `${String(y).padStart(4, "0")}-${String(m).padStart(2, "0")}-01`;
-
-  const d = new Date(y, m - 1, 1);
-  d.setMonth(d.getMonth() + 1);
-  const endY = d.getFullYear();
-  const endM = String(d.getMonth() + 1).padStart(2, "0");
-  const end = `${endY}-${endM}-01`;
-  return { start, end };
+  const [year, month] = period.split("-").map(Number);
+  const start = `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-01`;
+  const next = new Date(year, month - 1, 1);
+  next.setMonth(next.getMonth() + 1);
+  const endYear = next.getFullYear();
+  const endMonth = String(next.getMonth() + 1).padStart(2, "0");
+  return {
+    start,
+    end: `${endYear}-${endMonth}-01`,
+  };
 }
 
-// ===== Helpers: roster & name =====
 function getRoster() {
-  const base = [
-    { id: "hung", name: "Hưng" },
-    { id: "thao", name: "Thảo" },
-    { id: "thinh", name: "Thịnh" },
-    { id: "thuy", name: "Thùy" },
-  ];
-
-  const ms = state.members || [];
-  if (!ms.length) return base;
-
-  // Nếu members có memberId đúng, ưu tiên lấy displayName/email để hiển thị đẹp
-  return base.map((x) => {
-    const m = ms.find((z) => z.memberId === x.id);
-    if (!m) return x;
-    return {
-      id: x.id, // ✅ GIỮ ID CHUẨN để khớp payerId/debts
-      name: m.displayName || m.email || x.name,
-    };
-  });
+  return ROSTER.map((member) => ({
+    id: member.id,
+    name: getMemberLabelById(member.id),
+  }));
 }
 
-function nameOf(id, roster) {
-  return roster.find((x) => x.id === id)?.name || id || "—";
+function nameOf(memberId) {
+  return getMemberLabelById(memberId);
 }
 
-// ===== Engine minimal (same logic bạn đang dùng ở Expenses) =====
-function buildGrossMatrix(memberIds, expenses) {
-  const m = {};
-  for (const a of memberIds) {
-    m[a] = {};
-    for (const b of memberIds) m[a][b] = 0;
-  }
-
-  for (const e of expenses || []) {
-    const payer = e.payerId;
-    const debts = e.debts || {};
-    for (const [debtor, amount] of Object.entries(debts)) {
-      const amt = Number(amount || 0);
-      if (!payer || !debtor || !Number.isFinite(amt) || amt <= 0) continue;
-      if (!m[debtor] || m[debtor][payer] == null) continue;
-      m[debtor][payer] += amt;
-    }
-  }
-  return m;
-}
-
-function computeNetBalances(memberIds, gross) {
-  // balance = incoming - outgoing
-  const balances = {};
-  for (const id of memberIds) balances[id] = 0;
-
-  for (const debtor of memberIds) {
-    for (const creditor of memberIds) {
-      const v = Number(gross?.[debtor]?.[creditor] || 0);
-      if (!Number.isFinite(v) || v === 0) continue;
-
-      // debtor outgoing
-      balances[debtor] -= v;
-      // creditor incoming
-      balances[creditor] += v;
-    }
-  }
-  return balances;
+function getMyMemberId() {
+  return (
+    state.memberProfile?.memberId ||
+    EMAIL_TO_MEMBER_ID[state.user?.email || ""] ||
+    null
+  );
 }
 
 function applyPaymentsToBalances(balances, payments) {
-  const out = { ...balances };
+  const next = { ...balances };
 
-  for (const p of payments || []) {
-    const from = p.fromId;
-    const to = p.toId;
-    const amt = Number(p.amount || 0);
-    if (!from || !to || !Number.isFinite(amt) || amt <= 0) continue;
-
-    // người trả: bớt nợ => balance tăng
-    out[from] = (out[from] ?? 0) + amt;
-    // người nhận: bớt phải thu => balance giảm
-    out[to] = (out[to] ?? 0) - amt;
+  for (const payment of payments || []) {
+    const amount = Number(payment.amount || 0);
+    if (!payment.fromId || !payment.toId || amount <= 0) continue;
+    next[payment.fromId] = (next[payment.fromId] || 0) + amount;
+    next[payment.toId] = (next[payment.toId] || 0) - amount;
   }
-  return out;
+
+  return next;
 }
 
-function roundVND(n) {
-  return Math.round(Number(n || 0));
+function roundVnd(value) {
+  return Math.round(Number(value || 0));
 }
 
-function settleDebts(balances) {
-  const eps = 0.5;
-  const debtors = [];
-  const creditors = [];
+function rentSummaryForMember(rentDoc, myId) {
+  if (!rentDoc || !myId) return null;
 
-  for (const [id, b] of Object.entries(balances || {})) {
-    if (b < -eps)
-      debtors.push({ id, amt: -b }); // phải trả
-    else if (b > eps) creditors.push({ id, amt: b }); // được nhận
-  }
+  const payerId = rentDoc.payerId || "hung";
+  const shares = rentDoc.shares || {};
+  const paid = rentDoc.paid || {};
+  const total = Number(rentDoc.total || 0);
 
-  debtors.sort((a, b) => b.amt - a.amt);
-  creditors.sort((a, b) => b.amt - a.amt);
-
-  const res = [];
-  let i = 0,
-    j = 0;
-
-  while (i < debtors.length && j < creditors.length) {
-    const d = debtors[i];
-    const c = creditors[j];
-    const x = Math.min(d.amt, c.amt);
-
-    if (x > eps) {
-      res.push({ fromId: d.id, toId: c.id, amount: x });
-      d.amt -= x;
-      c.amt -= x;
-    }
-
-    if (d.amt <= eps) i++;
-    if (c.amt <= eps) j++;
-  }
-
-  return res;
-}
-
-function buildSettleMatrix(memberIds, settle) {
-  const m = {};
-  for (const a of memberIds) {
-    m[a] = {};
-    for (const b of memberIds) m[a][b] = 0;
-  }
-
-  for (const s of settle || []) {
-    const from = s.fromId ?? s.from ?? s.debtorId;
-    const to = s.toId ?? s.to ?? s.creditorId;
-    const amt = Number(s.amount ?? s.amt ?? 0);
-    if (!from || !to || !Number.isFinite(amt) || amt <= 0) continue;
-    if (!m[from] || m[from][to] == null) continue;
-    m[from][to] += amt;
-  }
-
-  return m;
-}
-
-// ===== realtime unsub holders =====
-let _unsubExpenses = null;
-let _unsubPayments = null;
-let _unsubRent = null;
-
-export function renderDashboardPage() {
-  const app = document.querySelector("#app");
-  // ✅ stop watchers from previous render (tránh callback bắn vào DOM cũ)
-  if (_unsubExpenses) {
-    _unsubExpenses();
-    _unsubExpenses = null;
-  }
-  if (_unsubPayments) {
-    _unsubPayments();
-    _unsubPayments = null;
-  }
-  if (_unsubRent) {
-    _unsubRent();
-    _unsubRent = null;
-  }
-
-  const email = state.user?.email || "Unknown";
-
-  const roster = getRoster();
-  const myId = EMAIL_TO_MEMBER_ID[state.user?.email || ""] || null;
-  const memberIds = roster.map((x) => x.id);
-
-  let period = currentPeriod();
-  let liveExpenses = [];
-  let livePayments = [];
-  let liveRent = null;
-
-  function getMyMemberId() {
-    const email = state.user?.email || "";
-    return EMAIL_TO_MEMBER_ID[email] || null;
-  }
-
-  function computeMyRentSummary(rentDoc) {
-    const myId = getMyMemberId();
-    if (!rentDoc || !myId) return null;
-
-    const payerId = rentDoc.payerId || "hung"; // fallback nếu bạn không lưu payerId
-    const shares = rentDoc.shares || {};
-    const paid = rentDoc.paid || {};
-
-    // tổng tiền tháng
-    const total = Number(rentDoc.total || 0);
-
-    // nếu là người trả chủ nhà (Hưng)
-    if (myId === payerId) {
-      const myShare = Number(shares[payerId] || 0);
-
-      // chỉ thu từ 3 người còn lại (không tính phần Hưng)
-      const expectedFromOthers = Math.max(0, total - myShare);
-
-      const collectedFromOthers = Object.entries(paid).reduce(
-        (sum, [id, val]) => {
-          if (id === payerId) return sum; // ✅ bỏ qua Hưng
-          return sum + Number(val || 0);
-        },
-        0,
-      );
-
-      const remainToCollect = Math.max(
-        0,
-        expectedFromOthers - collectedFromOthers,
-      );
-
-      return {
-        mode: "payer",
-        total,
-        myShare,
-        expectedFromOthers,
-        collectedFromOthers,
-        remainToCollect,
-      };
-    }
-
-    // người bình thường: phải đóng - đã chuyển
-    const mustPay = Number(shares[myId] || 0);
-    const alreadyPaid = Number(paid[myId] || 0);
-    const remain = Math.max(0, mustPay - alreadyPaid);
+  if (myId === payerId) {
+    const myShare = Number(shares[payerId] || 0);
+    const expectedFromOthers = Math.max(0, total - myShare);
+    const collectedFromOthers = Object.entries(paid).reduce(
+      (sum, [memberId, value]) =>
+        memberId === payerId ? sum : sum + Number(value || 0),
+      0,
+    );
+    const remainToCollect = Math.max(
+      0,
+      expectedFromOthers - collectedFromOthers,
+    );
 
     return {
-      mode: "member",
-      mustPay,
-      alreadyPaid,
-      remain,
+      mode: "payer",
+      total,
+      myShare,
+      expectedFromOthers,
+      collectedFromOthers,
+      remainToCollect,
+      status: rentDoc.status || "draft",
     };
   }
 
-  let onlyMine = true;
-  let personFilter = "all";
-  let gotExpenses = false;
-  let gotPayments = false;
+  const mustPay = Number(shares[myId] || 0);
+  const alreadyPaid = Number(paid[myId] || 0);
+  const remain = Math.max(0, mustPay - alreadyPaid);
 
-  function renderLoadingView() {
-    app.innerHTML = `
-    <div class="container py-4" style="max-width: 980px;">
-      <div class="d-flex justify-content-between align-items-center mb-3">
-        <div>
-          <h1 class="h4 mb-1">${t("dashboard")}</h1>
-          <div class="text-secondary small">${t("loggedInAs")}: ${email}</div>
-          <div class="text-secondary small">${t("group")}: ${state.groupId}</div>
+  return {
+    mode: "member",
+    mustPay,
+    alreadyPaid,
+    remain,
+    status: rentDoc.status || "draft",
+  };
+}
+
+function monthStatusCards({ expenses, payments, rent }) {
+  const rentStatus = !rent
+    ? {
+        badge: "bg-secondary",
+        text: "Chưa có tiền nhà",
+        detail: "Tháng này chưa tạo bản ghi tiền nhà.",
+      }
+    : rent.status === "finalized"
+      ? {
+          badge: "bg-success",
+          text: "Tiền nhà đã chốt",
+          detail: `Tổng ${formatVND(rent.total || 0)}`,
+        }
+      : {
+          badge: "bg-warning text-dark",
+          text: "Tiền nhà đang nháp",
+          detail: `Tổng ${formatVND(rent.total || 0)}`,
+        };
+
+  return [
+    {
+      title: "Chi tiêu",
+      badge: expenses.length ? "bg-primary" : "bg-secondary",
+      text: expenses.length ? `${expenses.length} khoản` : "Chưa có",
+      detail: expenses.length
+        ? "Đã có dữ liệu chi tiêu."
+        : "Tháng này chưa có khoản chi nào.",
+      href: "#/expenses",
+      cta: "Mở",
+    },
+    {
+      title: "Thanh toán",
+      badge: payments.length ? "bg-info text-dark" : "bg-secondary",
+      text: payments.length ? `${payments.length} giao dịch` : "Chưa có",
+      detail: payments.length
+        ? "Đã ghi nhận thanh toán."
+        : "Chưa có giao dịch thanh toán.",
+      href: "#/expenses",
+      cta: "Mở",
+    },
+    {
+      title: "Tiền nhà",
+      badge: rentStatus.badge,
+      text: rentStatus.text,
+      detail: rentStatus.detail,
+      href: "#/rent",
+      cta: "Mở",
+    },
+  ];
+}
+
+function renderRentCard(rentSummary) {
+  if (!rentSummary) {
+    return `
+      <div class="card mb-3">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <b>Tiền nhà tháng này</b>
+          <a class="btn btn-outline-secondary btn-sm" href="#/rent">Mở</a>
         </div>
-
-        <div class="d-flex gap-2">
-          <a class="btn btn-outline-primary btn-sm" href="#/expenses">Chi tiêu</a>
-          <button id="btnLogout" class="btn btn-outline-danger btn-sm">${t("logout")}</button>
+        <div class="card-body">
+          <div class="text-secondary">Chưa có bản ghi tiền nhà cho tháng này.</div>
         </div>
       </div>
-
-      <div class="row g-2 align-items-end mb-3">
-        <div class="col-6 col-md-4">
-          <label class="form-label small mb-1">Chọn tháng</label>
-          <input id="periodPicker" type="month" class="form-control" value="${period}" />
-        </div>
-      </div>
-
-      <div class="d-flex align-items-center gap-3">
-        <div class="spinner-border" role="status"></div>
-        <div>
-          <div class="fw-semibold">Đang tải dữ liệu tháng ${period}...</div>
-          <div class="text-secondary small">Sẽ tự cập nhật khi dữ liệu về</div>
-        </div>
-      </div>
-    </div>
-  `;
-
-    document.getElementById("btnLogout").onclick = async () => logout();
-
-    document.getElementById("periodPicker").onchange = (e) => {
-      period = e.target.value || currentPeriod();
-
-      // ✅ reset cờ loading khi đổi tháng
-      gotExpenses = false;
-      gotPayments = false;
-
-      startWatch();
-      renderLoadingView();
-    };
-  }
-
-  function renderView(settle, settleMatrix, rentSum) {
-    // ====== áp filter cho danh sách settle ======
-    let filtered = [...(settle || [])];
-
-    if (myId && onlyMine) {
-      filtered = filtered.filter((s) => s.fromId === myId || s.toId === myId);
-    }
-    if (personFilter !== "all") {
-      filtered = filtered.filter(
-        (s) => s.fromId === personFilter || s.toId === personFilter,
-      );
-    }
-
-    // ====== 2 hộp: của tôi (dựa trên settle gốc, KHÔNG bị filter theo người) ======
-    const myPayList = myId
-      ? (settle || []).filter((s) => s.fromId === myId)
-      : [];
-    const myReceiveList = myId
-      ? (settle || []).filter((s) => s.toId === myId)
-      : [];
-
-    const sum = (arr) => arr.reduce((a, x) => a + Number(x.amount || 0), 0);
-
-    const myPayTotal = sum(myPayList);
-    const myReceiveTotal = sum(myReceiveList);
-
-    const renderMiniList = (arr, emptyText) => {
-      if (!arr.length)
-        return `<div class="text-secondary small">${emptyText}</div>`;
-      return `
-      <ul class="list-group list-group-flush">
-        ${arr
-          .slice(0, 5)
-          .map((s) => {
-            const from = s.fromId;
-            const to = s.toId;
-            const amount = Number(s.amount || 0);
-            return `
-              <li class="list-group-item d-flex justify-content-between align-items-center">
-                <div class="small">
-                  <div class="fw-semibold">${nameOf(from, roster)} → ${nameOf(to, roster)}</div>
-                  <div class="text-secondary">${formatVND(amount)}</div>
-                </div>
-                <button class="btn btn-outline-secondary btn-sm" data-copy="${from}|${to}|${amount}">
-                  Copy
-                </button>
-              </li>
-            `;
-          })
-          .join("")}
-      </ul>
     `;
-    };
+  }
 
-    const renderSettleList = (arr) => {
-      if (!arr.length)
-        return `<li class="list-group-item text-secondary">Không có khoản nợ nào.</li>`;
+  const statusBadge =
+    rentSummary.status === "finalized"
+      ? `<span class="badge bg-success">ĐÃ CHỐT</span>`
+      : `<span class="badge bg-warning text-dark">NHÁP</span>`;
 
-      return arr
-        .map((s) => {
-          const from = s.fromId;
-          const to = s.toId;
-          const amount = Number(s.amount || 0);
-          return `
-          <li class="list-group-item d-flex justify-content-between align-items-center">
-            <div>
-              <div>${nameOf(from, roster)} → <b>${nameOf(to, roster)}</b></div>
-              <div class="small text-secondary">${formatVND(amount)}</div>
-            </div>
-            <button class="btn btn-outline-secondary btn-sm" data-copy="${from}|${to}|${amount}">
-              Copy
-            </button>
-          </li>
-        `;
-        })
-        .join("");
-    };
+  if (rentSummary.mode === "payer") {
+    const percent = clampPercent(
+      rentSummary.expectedFromOthers <= 0
+        ? 100
+        : (rentSummary.collectedFromOthers / rentSummary.expectedFromOthers) *
+            100,
+    );
 
-    let rentBoxHtml = "";
-    if (rentSum) {
-      if (rentSum.mode === "payer") {
-        const pct = clampPct(
-          rentSum.expectedFromOthers <= 0
-            ? 100
-            : (rentSum.collectedFromOthers / rentSum.expectedFromOthers) * 100,
-        );
-
-        const badge =
-          rentSum.remainToCollect <= 0
-            ? `<span class="badge bg-success">ĐÃ THU ĐỦ</span>`
-            : `<span class="badge bg-warning text-dark">CÒN THIẾU ${formatVND(rentSum.remainToCollect)}</span>`;
-
-        rentBoxHtml = `
+    return `
       <div class="card mb-3">
         <div class="card-header d-flex justify-content-between align-items-center">
           <b>Tiền nhà tháng này</b>
           <div class="d-flex align-items-center gap-2">
-            ${badge}
+            ${statusBadge}
             <a class="btn btn-outline-secondary btn-sm" href="#/rent">Mở</a>
           </div>
         </div>
-
         <div class="card-body">
-          <div class="text-secondary small mb-2">Bạn là người trả.</div>
-
+          <div class="text-secondary small mb-2">Bạn là người trả nhà.</div>
           <div class="row g-3">
             <div class="col-12 col-md-4">
               <div class="text-secondary small">Phần của bạn</div>
-              <div class="fw-semibold fs-5">${formatVND(rentSum.myShare)}</div>
+              <div class="fw-semibold fs-5">${formatVND(rentSummary.myShare)}</div>
             </div>
-
             <div class="col-12 col-md-8">
               <div class="d-flex justify-content-between small text-secondary">
                 <span>Tiến độ thu tiền</span>
-                <span>${Math.round(pct)}%</span>
+                <span>${Math.round(percent)}%</span>
               </div>
-
               <div class="progress" style="height: 10px;">
-                <div class="progress-bar ${rentSum.remainToCollect <= 0 ? "bg-success" : "bg-warning"}"
-                     role="progressbar"
-                     style="width:${pct}%"
-                     aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100"></div>
+                <div class="progress-bar ${
+                  rentSummary.remainToCollect <= 0 ? "bg-success" : "bg-warning"
+                }" style="width:${percent}%"></div>
               </div>
-
               <div class="row mt-3 text-center">
                 <div class="col">
                   <div class="text-secondary small">Cần thu</div>
-                  <div class="fw-semibold">${formatVND(rentSum.expectedFromOthers)}</div>
+                  <div class="fw-semibold">${formatVND(rentSummary.expectedFromOthers)}</div>
                 </div>
                 <div class="col">
                   <div class="text-secondary small">Đã thu</div>
-                  <div class="fw-semibold text-success">${formatVND(rentSum.collectedFromOthers)}</div>
+                  <div class="fw-semibold text-success">${formatVND(rentSummary.collectedFromOthers)}</div>
                 </div>
                 <div class="col">
                   <div class="text-secondary small">Còn thiếu</div>
-                  <div class="fw-semibold ${rentSum.remainToCollect <= 0 ? "text-success" : "text-danger"}">
-                    ${formatVND(rentSum.remainToCollect)}
+                  <div class="fw-semibold ${
+                    rentSummary.remainToCollect <= 0
+                      ? "text-success"
+                      : "text-danger"
+                  }">
+                    ${formatVND(rentSummary.remainToCollect)}
                   </div>
                 </div>
               </div>
             </div>
           </div>
-
         </div>
       </div>
     `;
-      } else {
-        const pct = clampPct(
-          rentSum.mustPay <= 0
-            ? 100
-            : (rentSum.alreadyPaid / rentSum.mustPay) * 100,
-        );
+  }
 
-        const badge =
-          rentSum.remain <= 0
-            ? `<span class="badge bg-success">ĐÃ XONG</span>`
-            : `<span class="badge bg-danger">CÒN THIẾU ${formatVND(rentSum.remain)}</span>`;
+  const percent = clampPercent(
+    rentSummary.mustPay <= 0
+      ? 100
+      : (rentSummary.alreadyPaid / rentSummary.mustPay) * 100,
+  );
 
-        rentBoxHtml = `
-      <div class="card mb-3">
-        <div class="card-header d-flex justify-content-between align-items-center">
-          <b>Tiền nhà tháng này</b>
-          <div class="d-flex align-items-center gap-2">
-            ${badge}
-            <a class="btn btn-outline-secondary btn-sm" href="#/rent">Mở</a>
+  return `
+    <div class="card mb-3">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <b>Tiền nhà tháng này</b>
+        <div class="d-flex align-items-center gap-2">
+          ${statusBadge}
+          <a class="btn btn-outline-secondary btn-sm" href="#/rent">Mở</a>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="d-flex justify-content-between small text-secondary">
+          <span>Tiến độ đóng tiền</span>
+          <span>${Math.round(percent)}%</span>
+        </div>
+        <div class="progress" style="height: 10px;">
+          <div class="progress-bar ${
+            rentSummary.remain <= 0 ? "bg-success" : "bg-danger"
+          }" style="width:${percent}%"></div>
+        </div>
+        <div class="row mt-3 text-center">
+          <div class="col">
+            <div class="text-secondary small">Bạn cần trả</div>
+            <div class="fw-semibold">${formatVND(rentSummary.mustPay)}</div>
+          </div>
+          <div class="col">
+            <div class="text-secondary small">Đã chuyển</div>
+            <div class="fw-semibold text-success">${formatVND(rentSummary.alreadyPaid)}</div>
+          </div>
+          <div class="col">
+            <div class="text-secondary small">Còn thiếu</div>
+            <div class="fw-semibold ${
+              rentSummary.remain <= 0 ? "text-success" : "text-danger"
+            }">
+              ${formatVND(rentSummary.remain)}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderTransactionList(list, emptyText) {
+  if (!list.length) {
+    return `<div class="text-secondary small">${emptyText}</div>`;
+  }
+
+  return `
+    <ul class="list-group list-group-flush">
+      ${list
+        .slice(0, 5)
+        .map(
+          (item) => `
+        <li class="list-group-item d-flex justify-content-between align-items-center">
+          <div class="small">
+            <div class="fw-semibold">${nameOf(item.fromId)} -> ${nameOf(item.toId)}</div>
+            <div class="text-secondary">${formatVND(item.amount)}</div>
+          </div>
+          <button class="btn btn-outline-secondary btn-sm" data-copy="${item.fromId}|${item.toId}|${item.amount}">
+            Copy
+          </button>
+        </li>
+      `,
+        )
+        .join("")}
+    </ul>
+  `;
+}
+
+function renderSettleList(list) {
+  if (!list.length) {
+    return `<li class="list-group-item text-secondary">Không có khoản nợ nào.</li>`;
+  }
+
+  return list
+    .map(
+      (item) => `
+    <li class="list-group-item d-flex justify-content-between align-items-center">
+      <div>
+        <div>${nameOf(item.fromId)} -> <b>${nameOf(item.toId)}</b></div>
+        <div class="small text-secondary">${formatVND(item.amount)}</div>
+      </div>
+      <button class="btn btn-outline-secondary btn-sm" data-copy="${item.fromId}|${item.toId}|${item.amount}">
+        Copy
+      </button>
+    </li>
+  `,
+    )
+    .join("");
+}
+
+export function renderDashboardPage() {
+  const app = document.querySelector("#app");
+  const roster = getRoster();
+  const memberIds = roster.map((member) => member.id);
+  const myId = getMyMemberId();
+  const currentUserLabel = getCurrentUserLabel(state);
+
+  if (unsubscribeExpenses) unsubscribeExpenses();
+  if (unsubscribePayments) unsubscribePayments();
+  if (unsubscribeRent) unsubscribeRent();
+  unsubscribeExpenses = null;
+  unsubscribePayments = null;
+  unsubscribeRent = null;
+
+  let period = currentPeriod();
+  let liveExpenses = [];
+  let livePayments = [];
+  let liveRent = null;
+  let expensesReady = false;
+  let paymentsReady = false;
+  let onlyMine = true;
+  let personFilter = "all";
+
+  function renderLoading() {
+    app.innerHTML = `
+      <div class="container py-4" style="max-width: 980px;">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+          <div>
+            <h1 class="h4 mb-1">${t("dashboard")}</h1>
+            <div class="text-secondary small">${t("loggedInAs")}: ${currentUserLabel}</div>
+            <div class="text-secondary small">${t("group")}: ${state.groupId}</div>
+          </div>
+          <div class="d-flex gap-2">
+            <a class="btn btn-outline-primary btn-sm" href="#/expenses">Chi tiêu</a>
+            <a class="btn btn-outline-secondary btn-sm" href="#/rent">Tiền nhà</a>
+            <button id="btnLogout" class="btn btn-outline-danger btn-sm">${t(
+              "logout",
+            )}</button>
           </div>
         </div>
 
-        <div class="card-body">
-          <div class="d-flex justify-content-between small text-secondary">
-            <span>Tiến độ đóng tiền</span>
-            <span>${Math.round(pct)}%</span>
+        <div class="row g-2 align-items-end mb-3">
+          <div class="col-6 col-md-4">
+            <label class="form-label small mb-1">Chọn tháng</label>
+            <input id="periodPicker" type="month" class="form-control" value="${period}" />
           </div>
+        </div>
 
-          <div class="progress" style="height: 10px;">
-            <div class="progress-bar ${rentSum.remain <= 0 ? "bg-success" : "bg-danger"}"
-                 role="progressbar"
-                 style="width:${pct}%"
-                 aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100"></div>
+        <div class="d-flex align-items-center gap-3">
+          <div class="spinner-border" role="status"></div>
+          <div>
+            <div class="fw-semibold">Đang tải dữ liệu tháng ${period}...</div>
+            <div class="text-secondary small">Sẽ tự động cập nhật khi dữ liệu thay đổi.</div>
           </div>
+        </div>
+      </div>
+    `;
 
-          <div class="row mt-3 text-center">
-            <div class="col">
-              <div class="text-secondary small">Bạn cần trả</div>
-              <div class="fw-semibold">${formatVND(rentSum.mustPay)}</div>
+    byId("btnLogout").onclick = async () => logout();
+    byId("periodPicker").onchange = (event) => {
+      period = event.target.value || currentPeriod();
+      expensesReady = false;
+      paymentsReady = false;
+      startWatch();
+      renderLoading();
+    };
+  }
+
+  function recomputeAndRender() {
+    if (!expensesReady || !paymentsReady) {
+      renderLoading();
+      return;
+    }
+
+    const gross = buildGrossMatrix(memberIds, liveExpenses);
+    let balances = computeNetBalances(memberIds, gross);
+    balances = applyPaymentsToBalances(balances, livePayments);
+
+    for (const memberId of Object.keys(balances)) {
+      balances[memberId] = roundVnd(balances[memberId]);
+    }
+
+    const settle = settleDebts(balances).map((item) => ({
+      fromId: item.fromId || item.from || item.debtorId,
+      toId: item.toId || item.to || item.creditorId,
+      amount: Number(item.amount || item.amt || 0),
+    }));
+
+    const filtered = settle.filter((item) => {
+      if (myId && onlyMine && item.fromId !== myId && item.toId !== myId) {
+        return false;
+      }
+      if (
+        personFilter !== "all" &&
+        item.fromId !== personFilter &&
+        item.toId !== personFilter
+      ) {
+        return false;
+      }
+      return true;
+    });
+
+    const myPayList = myId
+      ? settle.filter((item) => item.fromId === myId)
+      : [];
+    const myReceiveList = myId
+      ? settle.filter((item) => item.toId === myId)
+      : [];
+    const myPayTotal = myPayList.reduce(
+      (sum, item) => sum + Number(item.amount || 0),
+      0,
+    );
+    const myReceiveTotal = myReceiveList.reduce(
+      (sum, item) => sum + Number(item.amount || 0),
+      0,
+    );
+    const rentSummary = rentSummaryForMember(liveRent, myId);
+    const statusCards = monthStatusCards({
+      expenses: liveExpenses,
+      payments: livePayments,
+      rent: liveRent,
+    });
+
+    app.innerHTML = `
+      <div class="container py-4" style="max-width: 980px;">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+          <div>
+            <h1 class="h4 mb-1">${t("dashboard")}</h1>
+            <div class="text-secondary small">${t("loggedInAs")}: ${currentUserLabel}</div>
+            <div class="text-secondary small">${t("group")}: ${state.groupId}</div>
+          </div>
+          <div class="d-flex gap-2">
+            <a class="btn btn-outline-primary btn-sm" href="#/expenses">Chi tiêu</a>
+            <a class="btn btn-outline-secondary btn-sm" href="#/rent">Tiền nhà</a>
+            <button id="btnLogout" class="btn btn-outline-danger btn-sm">${t(
+              "logout",
+            )}</button>
+          </div>
+        </div>
+
+        <div class="row g-2 align-items-end mb-3">
+          <div class="col-6 col-md-4">
+            <label class="form-label small mb-1">Chọn tháng</label>
+            <input id="periodPicker" type="month" class="form-control" value="${period}" />
+          </div>
+          <div class="col-6 col-md-4">
+            <label class="form-label small mb-1">Lọc nhanh</label>
+            <div class="form-check mt-2">
+              <input class="form-check-input" type="checkbox" id="onlyMine" ${
+                onlyMine ? "checked" : ""
+              } ${myId ? "" : "disabled"}>
+              <label class="form-check-label" for="onlyMine">Chỉ liên quan tới tôi</label>
             </div>
-            <div class="col">
-              <div class="text-secondary small">Đã chuyển</div>
-              <div class="fw-semibold text-success">${formatVND(rentSum.alreadyPaid)}</div>
+            ${
+              !myId
+                ? `<div class="small text-warning">Chưa xác định được memberId của tài khoản này.</div>`
+                : ""
+            }
+          </div>
+          <div class="col-12 col-md-4">
+            <label class="form-label small mb-1">Lọc theo người</label>
+            <select id="personFilter" class="form-select">
+              <option value="all" ${
+                personFilter === "all" ? "selected" : ""
+              }>Tất cả</option>
+              ${roster
+                .map(
+                  (member) => `
+                <option value="${member.id}" ${
+                  personFilter === member.id ? "selected" : ""
+                }>${member.name}</option>
+              `,
+                )
+                .join("")}
+            </select>
+          </div>
+        </div>
+
+        <div class="row g-2 mb-3">
+          ${statusCards
+            .map(
+              (item) => `
+            <div class="col-12 col-md-4">
+              <div class="card h-100">
+                <div class="card-body">
+                  <div class="d-flex justify-content-between align-items-start mb-2">
+                    <div class="fw-semibold">${item.title}</div>
+                    <span class="badge ${item.badge}">${item.text}</span>
+                  </div>
+                  <div class="text-secondary small mb-3">${item.detail}</div>
+                  <a class="btn btn-outline-secondary btn-sm" href="${item.href}">${item.cta}</a>
+                </div>
+              </div>
             </div>
-            <div class="col">
-              <div class="text-secondary small">Còn thiếu</div>
-              <div class="fw-semibold ${rentSum.remain <= 0 ? "text-success" : "text-danger"}">
-                ${formatVND(rentSum.remain)}
+          `,
+            )
+            .join("")}
+        </div>
+
+        ${renderRentCard(rentSummary)}
+
+        <div class="row g-2 mb-3">
+          <div class="col-12 col-md-6">
+            <div class="card h-100">
+              <div class="card-header d-flex justify-content-between">
+                <b>Bạn cần trả</b>
+                <span class="fw-semibold">${formatVND(myPayTotal)}</span>
+              </div>
+              <div class="card-body p-0">
+                ${renderTransactionList(
+                  myPayList,
+                  "Không có khoản cần trả.",
+                )}
               </div>
             </div>
           </div>
 
+          <div class="col-12 col-md-6">
+            <div class="card h-100">
+              <div class="card-header d-flex justify-content-between">
+                <b>Bạn sẽ nhận</b>
+                <span class="fw-semibold">${formatVND(myReceiveTotal)}</span>
+              </div>
+              <div class="card-body p-0">
+                ${renderTransactionList(
+                  myReceiveList,
+                  "Không có khoản cần nhận.",
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header d-flex justify-content-between align-items-center">
+            <b>Kết quả cân trừ (ai trả ai)</b>
+            <span class="small text-secondary">${filtered.length} dòng</span>
+          </div>
+          <ul class="list-group list-group-flush">
+            ${renderSettleList(filtered)}
+          </ul>
         </div>
       </div>
     `;
-      }
-    }
-    app.innerHTML = `
-    <div class="container py-4" style="max-width: 980px;">
-      <div class="d-flex justify-content-between align-items-center mb-3">
-        <div>
-          <h1 class="h4 mb-1">${t("dashboard")}</h1>
-          <div class="text-secondary small">${t("loggedInAs")}: ${email}</div>
-          <div class="text-secondary small">${t("group")}: ${state.groupId}</div>
-        </div>
 
-        <div class="d-flex gap-2">
-          <a class="btn btn-outline-primary btn-sm" href="#/expenses">Chi tiêu</a>
-          <a class="btn btn-outline-secondary btn-sm" href="#/rent">Tiền nhà</a>
-          <button id="btnLogout" class="btn btn-outline-danger btn-sm">${t("logout")}</button>
-        </div>
-      </div>
-
-      <div class="row g-2 align-items-end mb-3">
-        <div class="col-6 col-md-4">
-          <label class="form-label small mb-1">Chọn tháng</label>
-          <input id="periodPicker" type="month" class="form-control" value="${period}" />
-        </div>
-
-        <div class="col-6 col-md-4">
-          <label class="form-label small mb-1">Lọc nhanh</label>
-          <div class="form-check mt-2">
-            <input class="form-check-input" type="checkbox" id="onlyMine" ${onlyMine ? "checked" : ""} ${myId ? "" : "disabled"}>
-            <label class="form-check-label" for="onlyMine">Chỉ liên quan tới tôi</label>
-          </div>
-          ${!myId ? `<div class="small text-warning">Không xác định được “bạn là ai” (email chưa map memberId).</div>` : ""}
-        </div>
-
-        <div class="col-12 col-md-4">
-          <label class="form-label small mb-1">Lọc theo người</label>
-          <select id="personFilter" class="form-select">
-            <option value="all" ${personFilter === "all" ? "selected" : ""}>Tất cả</option>
-            ${roster
-              .map(
-                (m) =>
-                  `<option value="${m.id}" ${personFilter === m.id ? "selected" : ""}>${m.name}</option>`,
-              )
-              .join("")}
-          </select>
-        </div>
-      </div>
-
-      ${rentBoxHtml}
-
-      <div class="row g-2 mb-3">
-        <div class="col-12 col-md-6">
-          <div class="card h-100">
-            <div class="card-header d-flex justify-content-between">
-              <b>Bạn cần trả</b>
-              <span class="fw-semibold">${formatVND(myPayTotal)}</span>
-            </div>
-            <div class="card-body p-0">
-              ${renderMiniList(myPayList, "Không có khoản cần trả.")}
-            </div>
-          </div>
-        </div>
-
-        <div class="col-12 col-md-6">
-          <div class="card h-100">
-            <div class="card-header d-flex justify-content-between">
-              <b>Bạn sẽ nhận</b>
-              <span class="fw-semibold">${formatVND(myReceiveTotal)}</span>
-            </div>
-            <div class="card-body p-0">
-              ${renderMiniList(myReceiveList, "Không có khoản cần nhận.")}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="card-header d-flex justify-content-between align-items-center">
-          <b>Kết quả cấn trừ (ai trả ai)</b>
-          <span class="small text-secondary">${filtered.length} dòng</span>
-        </div>
-        <ul class="list-group list-group-flush">
-          ${renderSettleList(filtered)}
-        </ul>
-      </div>
-
-    </div>
-  `;
-
-    // ====== bind ======
-    document.getElementById("btnLogout").onclick = async () => logout();
-
-    document.getElementById("periodPicker").onchange = (e) => {
-      period = e.target.value || currentPeriod();
-      gotExpenses = false;
-      gotPayments = false;
+    byId("btnLogout").onclick = async () => logout();
+    byId("periodPicker").onchange = (event) => {
+      period = event.target.value || currentPeriod();
+      expensesReady = false;
+      paymentsReady = false;
       startWatch();
-      renderLoadingView();
+      renderLoading();
     };
-
-    document.getElementById("onlyMine")?.addEventListener("change", (e) => {
-      onlyMine = !!e.target.checked;
+    byId("onlyMine")?.addEventListener("change", (event) => {
+      onlyMine = !!event.target.checked;
+      recomputeAndRender();
+    });
+    byId("personFilter")?.addEventListener("change", (event) => {
+      personFilter = event.target.value || "all";
       recomputeAndRender();
     });
 
-    document.getElementById("personFilter")?.addEventListener("change", (e) => {
-      personFilter = e.target.value || "all";
-      recomputeAndRender();
-    });
-
-    // copy buttons
-    app.querySelectorAll("[data-copy]").forEach((btn) => {
-      btn.addEventListener("click", async () => {
-        const [fromId, toId, amountStr] = btn
+    app.querySelectorAll("[data-copy]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const [fromId, toId, amountString] = button
           .getAttribute("data-copy")
           .split("|");
-        const amount = Number(amountStr || 0);
+        const amount = Number(amountString || 0);
+        const text = `${nameOf(fromId)} chuyển ${formatVND(amount)} cho ${nameOf(toId)} (tháng ${period})`;
 
-        const text = `${nameOf(fromId, roster)} chuyển ${formatVND(amount)} cho ${nameOf(toId, roster)} (tháng ${period})`;
         try {
           await navigator.clipboard.writeText(text);
-          const old = btn.textContent;
-          btn.textContent = "Đã copy";
-          setTimeout(() => (btn.textContent = old), 900);
+          const oldText = button.textContent;
+          button.textContent = "Đã copy";
+          setTimeout(() => {
+            button.textContent = oldText;
+          }, 900);
         } catch {
-          // fallback
           window.prompt("Copy nội dung này:", text);
         }
       });
     });
   }
 
-  function recomputeAndRender() {
-    if (!gotExpenses || !gotPayments) {
-      renderLoadingView();
-      return;
-    }
-    const gross = buildGrossMatrix(memberIds, liveExpenses);
-    let balances = computeNetBalances(memberIds, gross);
-    balances = applyPaymentsToBalances(balances, livePayments);
-    for (const k of Object.keys(balances)) {
-      balances[k] = roundVND(balances[k]);
-    }
-    const settle = settleDebts(balances);
-    const settleMatrix = buildSettleMatrix(memberIds, settle);
-    const rentSum = computeMyRentSummary(liveRent); // ✅ THÊM
-    renderView(settle, settleMatrix, rentSum);
-  }
-
   function startWatch() {
-    if (_unsubExpenses) _unsubExpenses();
-    if (_unsubPayments) _unsubPayments();
-    if (_unsubRent) _unsubRent();
+    if (unsubscribeExpenses) unsubscribeExpenses();
+    if (unsubscribePayments) unsubscribePayments();
+    if (unsubscribeRent) unsubscribeRent();
 
     const { start, end } = getMonthRange(period);
     const groupId = state.groupId;
 
-    _unsubExpenses = watchExpensesByRange(groupId, start, end, (items) => {
+    unsubscribeExpenses = watchExpensesByRange(groupId, start, end, (items) => {
       if (!document.body.contains(app)) return;
-
       liveExpenses = items;
-      gotExpenses = true;
-
+      expensesReady = true;
       recomputeAndRender();
     });
 
-    _unsubPayments = watchPaymentsByRange(groupId, start, end, (items) => {
+    unsubscribePayments = watchPaymentsByRange(groupId, start, end, (items) => {
       if (!document.body.contains(app)) return;
-
       livePayments = items;
-      gotPayments = true;
-
+      paymentsReady = true;
       recomputeAndRender();
     });
 
-    _unsubRent = watchRentByPeriod(groupId, period, (doc) => {
+    unsubscribeRent = watchRentByPeriod(groupId, period, (doc) => {
       if (!document.body.contains(app)) return;
       liveRent = doc;
-      recomputeAndRender(); // để rentBox update realtime
+      recomputeAndRender();
     });
   }
 
-  // ✅ auto cleanup when leaving expenses page
   const onHashChange = () => {
     if (!location.hash.startsWith("#/dashboard")) {
-      if (_unsubExpenses) {
-        _unsubExpenses();
-        _unsubExpenses = null;
-      }
-      if (_unsubPayments) {
-        _unsubPayments();
-        _unsubPayments = null;
-      }
-      if (_unsubRent) {
-        _unsubRent();
-        _unsubRent = null;
-      } // ✅ THÊM
-
+      if (unsubscribeExpenses) unsubscribeExpenses();
+      if (unsubscribePayments) unsubscribePayments();
+      if (unsubscribeRent) unsubscribeRent();
+      unsubscribeExpenses = null;
+      unsubscribePayments = null;
+      unsubscribeRent = null;
       window.removeEventListener("hashchange", onHashChange);
     }
   };
 
   window.addEventListener("hashchange", onHashChange);
-
   startWatch();
-  renderLoadingView();
+  renderLoading();
 }

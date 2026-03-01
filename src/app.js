@@ -1,24 +1,37 @@
 import {
-  watchAuth,
+  getAuthErrorMessage,
   logout,
   resolvePendingGoogleRedirect,
-  getAuthErrorMessage,
+  watchAuth,
 } from "./services/auth.service";
-import { setUser, setGroup, setMembers, state } from "./core/state";
+import {
+  setGroup,
+  setMemberProfile,
+  setMembers,
+  setUser,
+  state,
+} from "./core/state";
+import { normalizeMemberRole } from "./core/roles";
 import { renderLoginPage } from "./ui/pages/login.page";
 import { renderDashboardPage } from "./ui/pages/dashboard.page";
 import { renderExpensesPage } from "./ui/pages/expenses.page";
 import { renderRentPage } from "./ui/pages/rent.page";
-import { ensureDefaultGroup, getMembers } from "./services/group.service";
-import { upsertMemberProfile } from "./services/member.service";
+import { ensureDefaultGroup } from "./services/group.service";
+import {
+  getCurrentMemberProfile,
+  upsertMemberProfile,
+  watchGroupMembers,
+  watchMyMemberProfile,
+} from "./services/member.service";
 import { EMAIL_TO_MEMBER_ID } from "./config/members.map";
-import { isAdmin } from "./core/roles";
 
 let authReady = false;
 let bootLoading = true;
 let bootError = null;
 let redirectResolved = false;
 let pendingLoginMessage = "";
+let unsubMyMemberProfile = null;
+let unsubGroupMembers = null;
 
 function getRoute() {
   return window.location.hash || "#/dashboard";
@@ -75,6 +88,30 @@ function renderBootScreen() {
   }
 }
 
+function stopGroupSubscriptions() {
+  if (unsubMyMemberProfile) {
+    unsubMyMemberProfile();
+    unsubMyMemberProfile = null;
+  }
+
+  if (unsubGroupMembers) {
+    unsubGroupMembers();
+    unsubGroupMembers = null;
+  }
+}
+
+function startGroupSubscriptions(groupId, uid) {
+  stopGroupSubscriptions();
+
+  unsubMyMemberProfile = watchMyMemberProfile(groupId, uid, (profile) => {
+    setMemberProfile(profile);
+  });
+
+  unsubGroupMembers = watchGroupMembers(groupId, (members) => {
+    setMembers(members);
+  });
+}
+
 async function ensureMemberProfile() {
   const email = state.user?.email || "";
   const memberId = EMAIL_TO_MEMBER_ID[email];
@@ -83,10 +120,31 @@ async function ensureMemberProfile() {
     throw new Error("Email chưa được gán thành viên trong nhóm.");
   }
 
+  const currentProfile = await getCurrentMemberProfile(
+    state.groupId,
+    state.user.uid,
+  );
+  const role = normalizeMemberRole(currentProfile || { memberId });
+
   await upsertMemberProfile(state.groupId, state.user, {
     memberId,
-    role: isAdmin(state.user) ? "admin" : "member",
+    role,
   });
+
+  const nextProfile = await getCurrentMemberProfile(
+    state.groupId,
+    state.user.uid,
+  );
+  setMemberProfile(
+    nextProfile || {
+      uid: state.user.uid,
+      email,
+      displayName: state.user.displayName || "",
+      photoURL: state.user.photoURL || "",
+      memberId,
+      role,
+    },
+  );
 }
 
 async function afterLoginSetup(user) {
@@ -99,14 +157,12 @@ async function afterLoginSetup(user) {
     setGroup(groupId);
 
     await ensureMemberProfile();
-
-    const members = await getMembers(groupId);
-    setMembers(members);
+    startGroupSubscriptions(groupId, user.uid);
 
     bootLoading = false;
-  } catch (e) {
-    console.error("Boot setup failed:", e);
-    bootError = e?.message || "Unknown error";
+  } catch (error) {
+    console.error("Boot setup failed:", error);
+    bootError = error?.message || "Unknown error";
     bootLoading = false;
     renderBootScreen();
   }
@@ -136,18 +192,22 @@ async function render() {
   const route = getRoute();
   if (route.startsWith("#/expenses")) {
     await renderExpensesPage();
-  } else if (route.startsWith("#/rent")) {
-    await renderRentPage();
-  } else {
-    renderDashboardPage();
+    return;
   }
+
+  if (route.startsWith("#/rent")) {
+    await renderRentPage();
+    return;
+  }
+
+  renderDashboardPage();
 }
 
 async function initAuthFlow() {
   try {
     await resolvePendingGoogleRedirect();
-  } catch (e) {
-    pendingLoginMessage = getAuthErrorMessage(e);
+  } catch (error) {
+    pendingLoginMessage = getAuthErrorMessage(error);
   } finally {
     redirectResolved = true;
     renderBootScreen();
@@ -160,8 +220,10 @@ async function initAuthFlow() {
     if (user) {
       await afterLoginSetup(user);
     } else {
+      stopGroupSubscriptions();
       setGroup(null);
       setMembers([]);
+      setMemberProfile(null);
       bootLoading = false;
       bootError = null;
     }

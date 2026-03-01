@@ -1,4 +1,3 @@
-// src/services/rent.service.js
 import { db } from "../config/firebase";
 import {
   collection,
@@ -12,9 +11,10 @@ import {
   query,
   serverTimestamp,
   setDoc,
-  updateDoc,
   where,
 } from "firebase/firestore";
+import { wrapFirestoreError } from "../core/errors";
+import { sanitizeRentPayload } from "../domain/rent/compute";
 
 const PERIOD_FALLBACK_SCAN_LIMIT = 12;
 
@@ -33,6 +33,7 @@ function isPermissionDenied(error) {
 
 function normalizeRentDoc(period, data) {
   if (!data) return null;
+
   return {
     id: period,
     period: data.period || period,
@@ -73,129 +74,65 @@ async function readRentFromPeriodDoc(groupId, period) {
 
 function buildRentPayload(period, payload, existingRent = null) {
   return {
-    ...payload,
-    period,
+    ...sanitizeRentPayload(period, payload, existingRent),
     updatedAt: serverTimestamp(),
-    createdAt: existingRent?.createdAt || payload?.createdAt || serverTimestamp(),
+    createdAt:
+      existingRent?.createdAt || payload?.createdAt || serverTimestamp(),
   };
 }
 
-function buildPeriodPayload(period, payload, existingRent = null) {
-  return {
-    period,
-    updatedAt: serverTimestamp(),
-    rent: buildRentPayload(period, payload, existingRent),
-  };
+function wrapRentError(error, period, path) {
+  console.error(`[rent] write failed for ${path}`, error);
+  return wrapFirestoreError(
+    error,
+    `Không thể lưu tiền nhà tháng ${period}. Hãy kiểm tra dữ liệu và Firestore rules.`,
+  );
 }
 
-function toUserFacingRentError(error, period) {
-  const code = error?.code || "";
-
-  if (code.includes("permission-denied")) {
-    const wrapped = new Error(
-      `Khong co quyen luu tien nha thang ${period}. Hay kiem tra Firestore rules cho rents/periods.`,
-    );
-    wrapped.code = error.code;
-    wrapped.cause = error;
-    return wrapped;
-  }
-
-  if (code.includes("failed-precondition")) {
-    const wrapped = new Error(
-      `Firestore dang thieu index hoac dieu kien ghi du lieu cho thang ${period}.`,
-    );
-    wrapped.code = error.code;
-    wrapped.cause = error;
-    return wrapped;
-  }
-
-  return error;
-}
-
-/**
- * Doc id = period (VD: "2026-02")
- * Preferred path: groups/{groupId}/rents/{period}
- * Fallback path when rules for rents are missing: groups/{groupId}/periods/{period}.rent
- */
 export async function upsertRentByPeriod(groupId, period, payload) {
   const existingRent = await getRentByPeriod(groupId, period);
-  const rentPayload = buildRentPayload(period, payload, existingRent);
+  const nextPayload = buildRentPayload(period, payload, existingRent);
 
   try {
-    await setDoc(rentDocRef(groupId, period), rentPayload, { merge: true });
+    await setDoc(rentDocRef(groupId, period), nextPayload, { merge: true });
     return period;
   } catch (error) {
-    if (!isPermissionDenied(error)) {
-      throw toUserFacingRentError(error, period);
-    }
-
-    console.warn(
-      `[rent] direct write denied at groups/${groupId}/rents/${period}, trying periods fallback`,
-      error,
-    );
-  }
-
-  try {
-    await setDoc(
-      periodDocRef(groupId, period),
-      buildPeriodPayload(period, payload, existingRent),
-      { merge: true },
-    );
-    return period;
-  } catch (error) {
-    console.error(
-      `[rent] fallback write denied at groups/${groupId}/periods/${period}`,
-      error,
-    );
-    throw toUserFacingRentError(error, period);
+    throw wrapRentError(error, period, `groups/${groupId}/rents/${period}`);
   }
 }
 
 export async function updateRentByPeriod(groupId, period, patch) {
-  const directRef = rentDocRef(groupId, period);
-
-  try {
-    await updateDoc(directRef, { ...patch, updatedAt: serverTimestamp() });
-    return;
-  } catch (error) {
-    if (!isPermissionDenied(error)) {
-      throw toUserFacingRentError(error, period);
-    }
-  }
-
   const existingRent = await getRentByPeriod(groupId, period);
+  const nextPayload = buildRentPayload(
+    period,
+    { ...(existingRent || {}), ...patch },
+    existingRent,
+  );
+
   try {
-    await setDoc(
-      periodDocRef(groupId, period),
-      buildPeriodPayload(
-        period,
-        { ...(existingRent || {}), ...patch },
-        existingRent,
-      ),
-      { merge: true },
-    );
+    await setDoc(rentDocRef(groupId, period), nextPayload, { merge: true });
   } catch (error) {
-    throw toUserFacingRentError(error, period);
+    throw wrapRentError(error, period, `groups/${groupId}/rents/${period}`);
   }
 }
 
-export function watchRentByPeriod(groupId, period, cb) {
+export function watchRentByPeriod(groupId, period, callback) {
   let directValue = undefined;
   let fallbackValue = undefined;
 
   const emit = () => {
     if (directValue && typeof directValue === "object") {
-      cb(directValue);
+      callback(directValue);
       return;
     }
 
     if (fallbackValue && typeof fallbackValue === "object") {
-      cb(fallbackValue);
+      callback(fallbackValue);
       return;
     }
 
     if (directValue !== undefined || fallbackValue !== undefined) {
-      cb(null);
+      callback(null);
     }
   };
 
@@ -245,7 +182,7 @@ export async function getRentByPeriod(groupId, period) {
   const direct = await readRentDoc(groupId, period);
   if (direct) return direct;
 
-  return await readRentFromPeriodDoc(groupId, period);
+  return readRentFromPeriodDoc(groupId, period);
 }
 
 export async function getLatestRentBefore(groupId, period) {
@@ -279,8 +216,8 @@ export async function getLatestRentBefore(groupId, period) {
     );
 
     const periodSnap = await getDocs(periodQuery);
-    for (const docSnap of periodSnap.docs) {
-      const normalized = normalizePeriodRentDoc(docSnap.id, docSnap.data());
+    for (const snap of periodSnap.docs) {
+      const normalized = normalizePeriodRentDoc(snap.id, snap.data());
       if (normalized) return normalized;
     }
   } catch (error) {

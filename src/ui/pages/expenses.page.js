@@ -1,7 +1,8 @@
 import { state } from "../../core/state";
+import { mapFirestoreError } from "../../core/errors";
 import { ROSTER, ROSTER_IDS, nameOf } from "../../config/roster";
+import { getCurrentUserLabel, getUserLabel } from "../../core/display-name";
 import { formatVND } from "../../config/i18n";
-import { isAdmin } from "../../core/roles";
 import { openPaymentModal } from "../components/paymentModal";
 import { showToast } from "../components/toast";
 import { openConfirmModal } from "../components/confirmModal";
@@ -37,22 +38,14 @@ function periodToYmd(period) {
 function creatorLabel(uid) {
   if (!uid) return "-";
 
-  // ưu tiên lấy từ members trong group (nếu bạn có lưu displayName/email)
-  const m = (state.members || []).find((x) => x.uid === uid || x.id === uid);
-  if (m) {
-    const name = (m.displayName || m.name || m.email || "User").trim();
-    const email = (m.email || "").trim();
-    return email ? `${name} (${email})` : name;
-  }
+  const member = (state.members || []).find((item) => item.uid === uid || item.id === uid);
+  if (member) return getUserLabel(member);
 
-  // fallback: nếu là chính mình
   if (state.user?.uid === uid) {
-    const name = (state.user.displayName || state.user.email || "Bạn").trim();
-    const email = (state.user.email || "").trim();
-    return email ? `${name} (${email})` : name;
+    return getCurrentUserLabel(state);
   }
 
-  return uid; // fallback cuối
+  return uid;
 }
 
 // Nhập VNĐ: chấp nhận 10000, 10.000, 10,5, 10.000,5
@@ -119,7 +112,7 @@ const live = {
 export async function renderExpensesPage() {
   const app = document.querySelector("#app");
   if (!state.user) return;
-  const admin = isAdmin(state.user);
+  const admin = state.isAdmin;
   const payLocks = new Set(); // chống double submit
 
   // ====== UI: 1 cột dọc, rõ ràng, không “chốt sổ” rối
@@ -430,12 +423,13 @@ export async function renderExpensesPage() {
       renderDebtsInputs();
     } catch (e) {
       console.error(e);
-      setMsg(e?.message || "Lưu thất bại.");
+      const message = mapFirestoreError(e, "Lưu thất bại.");
+      setMsg(message);
 
       // ✅ Toast thất bại
       showToast({
         title: "Thất bại",
-        message: e?.message || "Không thể lưu khoản chi.",
+        message,
         variant: "danger",
       });
     } finally {
@@ -520,7 +514,7 @@ export async function renderExpensesPage() {
               // createPayment đã có toast fail, còn xóa thì thêm tại đây
               showToast({
                 title: "Thất bại",
-                message: err?.message || "Không thể xóa khoản chi.",
+                message: mapFirestoreError(err, "Không thể xóa khoản chi."),
                 variant: "danger",
               });
               throw err;
@@ -608,7 +602,7 @@ export async function renderExpensesPage() {
             } catch (err) {
               showToast({
                 title: "Thất bại",
-                message: err?.message || "Không thể xóa thanh toán.",
+                message: mapFirestoreError(err, "Không thể xóa thanh toán."),
                 variant: "danger",
               });
               throw err;
@@ -814,7 +808,7 @@ export async function renderExpensesPage() {
   }
 
   function bindPaymentButtons() {
-    if (!isAdmin(state.user)) return;
+    if (!state.isAdmin) return;
 
     // helper: lock theo giao dịch
     const lockKey = (fromId, toId) => `${fromId}__${toId}`;
@@ -914,17 +908,7 @@ export async function renderExpensesPage() {
     } catch (e) {
       console.error(e);
 
-      const code = e?.code || "";
-      let msg = e?.message || "Không thể ghi nhận thanh toán.";
-
-      if (code.includes("permission-denied"))
-        msg = "Bạn không có quyền ghi nhận thanh toán (chỉ admin).";
-      else if (code.includes("unavailable"))
-        msg = "Mất kết nối mạng hoặc Firestore đang bận. Thử lại.";
-      else if (code.includes("failed-precondition"))
-        msg = "Thiếu index hoặc điều kiện truy vấn chưa đúng.";
-      else if (code.includes("invalid-argument"))
-        msg = "Dữ liệu gửi lên không hợp lệ.";
+      const msg = mapFirestoreError(e, "Không thể ghi nhận thanh toán.");
 
       showToast({ title: "Thất bại", message: msg, variant: "danger" });
       throw e;

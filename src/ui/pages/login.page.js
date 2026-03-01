@@ -1,6 +1,6 @@
 import {
-  loginWithGoogle,
   getAuthErrorMessage,
+  loginWithGoogle,
 } from "../../services/auth.service";
 
 function el(id) {
@@ -56,8 +56,8 @@ export function renderLoginPage({ initialMessage = "" } = {}) {
 
     try {
       await loginWithGoogle();
-    } catch (e) {
-      msg(getAuthErrorMessage(e));
+    } catch (error) {
+      msg(getAuthErrorMessage(error));
       button.disabled = false;
     }
   };
