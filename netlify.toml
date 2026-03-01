@@ -3,18 +3,6 @@
   publish = "dist"
 
 [[redirects]]
-  from = "/__/auth/*"
-  to = "https://splitroom-ccda8.firebaseapp.com/__/auth/:splat"
-  status = 200
-  force = true
-
-[[redirects]]
-  from = "/__/firebase/*"
-  to = "https://splitroom-ccda8.firebaseapp.com/__/firebase/:splat"
-  status = 200
-  force = true
-
-[[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200

@@ -13,10 +13,6 @@ import { auth } from "../config/firebase";
 const provider = new GoogleAuthProvider();
 provider.setCustomParameters({ prompt: "select_account" });
 
-function isMobile() {
-  return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-}
-
 export function watchAuth(callback) {
   return onAuthStateChanged(auth, callback);
 }
@@ -32,13 +28,17 @@ export async function registerWithEmail(email, password) {
 }
 
 export async function loginWithGoogle() {
-  if (isMobile()) {
+  try {
+    await signInWithPopup(auth, provider);
+    return { mode: "popup" };
+  } catch (error) {
+    if (!shouldFallbackToRedirect(error)) {
+      throw error;
+    }
+
     await signInWithRedirect(auth, provider);
     return { mode: "redirect" };
   }
-
-  await signInWithPopup(auth, provider);
-  return { mode: "popup" };
 }
 
 export async function resolvePendingGoogleRedirect() {
@@ -77,6 +77,16 @@ export function getAuthErrorMessage(error) {
   }
 
   return error?.message || "Đăng nhập Google thất bại.";
+}
+
+function shouldFallbackToRedirect(error) {
+  const code = error?.code || "";
+
+  return (
+    code.includes("auth/popup-blocked") ||
+    code.includes("auth/operation-not-supported-in-this-environment") ||
+    code.includes("auth/web-storage-unsupported")
+  );
 }
 
 export async function logout() {
