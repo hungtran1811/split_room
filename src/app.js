@@ -1,36 +1,33 @@
-import { watchAuth, logout } from "./services/auth.service";
+import {
+  watchAuth,
+  logout,
+  resolvePendingGoogleRedirect,
+  getAuthErrorMessage,
+} from "./services/auth.service";
 import { setUser, setGroup, setMembers, state } from "./core/state";
 import { renderLoginPage } from "./ui/pages/login.page";
 import { renderDashboardPage } from "./ui/pages/dashboard.page";
 import { renderExpensesPage } from "./ui/pages/expenses.page";
-
+import { renderRentPage } from "./ui/pages/rent.page";
 import { ensureDefaultGroup, getMembers } from "./services/group.service";
-
-// Nếu bạn vẫn dùng mapping email -> memberId
 import { upsertMemberProfile } from "./services/member.service";
 import { EMAIL_TO_MEMBER_ID } from "./config/members.map";
 import { isAdmin } from "./core/roles";
-import { renderRentPage } from "./ui/pages/rent.page";
 
-// ===============================
-// APP BOOT STATE
-// ===============================
-let authReady = false; // Firebase đã trả auth state lần đầu chưa?
-let bootLoading = true; // Đang load group/members?
-let bootError = null; // Lỗi boot (nếu có)
+let authReady = false;
+let bootLoading = true;
+let bootError = null;
+let redirectResolved = false;
+let pendingLoginMessage = "";
 
 function getRoute() {
   return window.location.hash || "#/dashboard";
 }
 
-// ===============================
-// LOADING / ERROR SCREEN (HT STYLE)
-// ===============================
 function renderBootScreen() {
   const root = document.getElementById("app");
   if (!root) return;
 
-  // ERROR UI
   if (bootError) {
     root.innerHTML = `
       <div class="container py-5">
@@ -49,7 +46,7 @@ function renderBootScreen() {
       bootError = null;
       bootLoading = true;
       renderBootScreen();
-      // re-run setup if still logged in
+
       if (state.user) {
         await afterLoginSetup(state.user);
         await render();
@@ -63,8 +60,7 @@ function renderBootScreen() {
     return;
   }
 
-  // LOADING UI
-  if (!authReady || bootLoading) {
+  if (!redirectResolved || !authReady || bootLoading) {
     root.innerHTML = `
       <div class="container py-5">
         <div class="d-flex align-items-center gap-3">
@@ -79,9 +75,6 @@ function renderBootScreen() {
   }
 }
 
-// ===============================
-// MEMBER PROFILE (OPTIONAL)
-// ===============================
 async function ensureMemberProfile() {
   const email = state.user?.email || "";
   const memberId = EMAIL_TO_MEMBER_ID[email];
@@ -96,23 +89,17 @@ async function ensureMemberProfile() {
   });
 }
 
-// ===============================
-// AFTER LOGIN BOOT
-// ===============================
 async function afterLoginSetup(user) {
   bootLoading = true;
   bootError = null;
   renderBootScreen();
 
   try {
-    // 1) đảm bảo có group
     const groupId = await ensureDefaultGroup(user);
     setGroup(groupId);
 
-    // 2) (optional) đồng bộ member profile
     await ensureMemberProfile();
 
-    // 3) load members
     const members = await getMembers(groupId);
     setMembers(members);
 
@@ -125,32 +112,28 @@ async function afterLoginSetup(user) {
   }
 }
 
-// ===============================
-// ROUTER RENDER
-// ===============================
 async function render() {
-  // Auth chưa sẵn sàng -> chỉ show loading
-  if (!authReady) {
+  if (!redirectResolved || !authReady) {
     renderBootScreen();
     return;
   }
 
-  // Chưa login -> login page
   if (!state.user) {
     bootLoading = false;
     bootError = null;
-    renderLoginPage({ onDone: () => render() });
+
+    const initialMessage = pendingLoginMessage;
+    pendingLoginMessage = "";
+    renderLoginPage({ initialMessage });
     return;
   }
 
-  // Đang load group/members -> show loading
   if (bootLoading || bootError) {
     renderBootScreen();
     return;
   }
 
   const route = getRoute();
-
   if (route.startsWith("#/expenses")) {
     await renderExpensesPage();
   } else if (route.startsWith("#/rent")) {
@@ -160,17 +143,16 @@ async function render() {
   }
 }
 
-// ===============================
-// APP START
-// ===============================
-export function startApp() {
-  if (!window.location.hash || window.location.hash === "#") {
-    window.location.hash = "#/dashboard";
+async function initAuthFlow() {
+  try {
+    await resolvePendingGoogleRedirect();
+  } catch (e) {
+    pendingLoginMessage = getAuthErrorMessage(e);
+  } finally {
+    redirectResolved = true;
+    renderBootScreen();
   }
-  // 1) Vừa vào app luôn render loading trước (giống ht)
-  renderBootScreen();
 
-  // 2) Auth listener
   watchAuth(async (user) => {
     authReady = true;
     setUser(user);
@@ -187,6 +169,14 @@ export function startApp() {
     await render();
   });
 
-  // 3) Router
   window.addEventListener("hashchange", () => render());
+}
+
+export function startApp() {
+  if (!window.location.hash || window.location.hash === "#") {
+    window.location.hash = "#/dashboard";
+  }
+
+  renderBootScreen();
+  void initAuthFlow();
 }

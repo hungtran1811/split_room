@@ -1,21 +1,14 @@
 import {
   loginWithGoogle,
-  handleRedirectResult,
+  getAuthErrorMessage,
 } from "../../services/auth.service";
 
 function el(id) {
   return document.getElementById(id);
 }
 
-export function renderLoginPage({ onDone }) {
+export function renderLoginPage({ initialMessage = "" } = {}) {
   const app = document.querySelector("#app");
-
-  // Handle Google redirect login (mobile)
-  handleRedirectResult()
-    .then((user) => {
-      if (user) onDone?.();
-    })
-    .catch(() => {});
 
   app.innerHTML = `
     <div class="container py-5" style="max-width: 520px;">
@@ -29,7 +22,6 @@ export function renderLoginPage({ onDone }) {
           <div class="d-grid gap-2">
             <button id="btnGoogle" class="btn btn-outline-dark d-flex align-items-center justify-content-center gap-2" style="height: 44px;">
               <span class="d-inline-flex" aria-hidden="true">
-                <!-- Google "G" icon (SVG) -->
                 <svg width="18" height="18" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
                   <path fill="#EA4335" d="M24 9.5c3.54 0 6.72 1.22 9.23 3.6l6.9-6.9C35.9 2.35 30.38 0 24 0 14.62 0 6.51 5.38 2.56 13.22l8.02 6.23C12.43 13.24 17.74 9.5 24 9.5z"/>
                   <path fill="#4285F4" d="M46.98 24.55c0-1.57-.14-3.08-.4-4.55H24v9.02h12.95c-.56 3.01-2.24 5.56-4.76 7.27l7.28 5.64c4.26-3.94 6.71-9.75 6.71-17.38z"/>
@@ -51,16 +43,22 @@ export function renderLoginPage({ onDone }) {
     </div>
   `;
 
-  const msg = (t = "") => (el("msg").textContent = t);
+  const msg = (text = "") => {
+    el("msg").textContent = text;
+  };
+
+  msg(initialMessage);
 
   el("btnGoogle").onclick = async () => {
+    const button = el("btnGoogle");
     msg("");
+    button.disabled = true;
+
     try {
       await loginWithGoogle();
-      // Desktop popup sẽ vào ngay, mobile redirect sẽ xử lý ở handleRedirectResult()
-      onDone?.();
     } catch (e) {
-      msg(e?.message || "Google sign-in failed.");
+      msg(getAuthErrorMessage(e));
+      button.disabled = false;
     }
   };
 }
