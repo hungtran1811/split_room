@@ -45,11 +45,23 @@ service cloud.firestore {
         && memberExists(groupId, request.auth.uid);
     }
 
-    function isGroupAdmin(groupId) {
+    function isGroupOwner(groupId) {
       return signedIn()
         && isAllowedEmail()
         && (
           request.auth.uid == legacyAdminUid()
+          || (
+            memberExists(groupId, request.auth.uid)
+            && memberDoc(groupId, request.auth.uid).data.role == "owner"
+          )
+        );
+    }
+
+    function isGroupOperator(groupId) {
+      return signedIn()
+        && isAllowedEmail()
+        && (
+          isGroupOwner(groupId)
           || (
             memberExists(groupId, request.auth.uid)
             && memberDoc(groupId, request.auth.uid).data.role == "admin"
@@ -62,7 +74,19 @@ service cloud.firestore {
     }
 
     function validRole(role) {
-      return role in ["admin", "member"];
+      return role in ["owner", "admin", "member"];
+    }
+
+    function validMemberWrite(uid) {
+      return request.resource.data.uid == uid
+        && request.resource.data.memberId is string
+        && request.resource.data.email is string
+        && validRole(request.resource.data.role);
+    }
+
+    function validSelfCreateRole(uid) {
+      return request.resource.data.role == "member"
+        || (uid == legacyAdminUid() && request.resource.data.role == "owner");
     }
 
     function rentAllowedKeys() {
@@ -117,7 +141,7 @@ service cloud.firestore {
     }
 
     function validPeriodWrite(groupId, periodId) {
-      return isGroupAdmin(groupId)
+      return isGroupOperator(groupId)
         && request.resource.data.period is string
         && request.resource.data.period.matches(periodRegex())
         && request.resource.data.period == periodId;
@@ -126,18 +150,23 @@ service cloud.firestore {
     match /groups/{groupId} {
       allow read: if isAllowedEmail();
       allow create: if isAllowedEmail();
-      allow update, delete: if isGroupAdmin(groupId);
+      allow update, delete: if isGroupOwner(groupId);
 
       match /members/{uid} {
         allow read: if isGroupMember(groupId)
           || (signedIn() && isAllowedEmail() && request.auth.uid == uid);
         allow create: if isAllowedEmail()
           && request.auth.uid == uid
-          && request.resource.data.uid == uid
-          && request.resource.data.memberId is string
-          && request.resource.data.email is string
-          && validRole(request.resource.data.role);
-        allow update: if isGroupAdmin(groupId)
+          && request.resource.data.email == request.auth.token.email
+          && validMemberWrite(uid)
+          && validSelfCreateRole(uid);
+        allow update: if (
+            isGroupOwner(groupId)
+            && validMemberWrite(uid)
+            && request.resource.data.uid == resource.data.uid
+            && request.resource.data.email == resource.data.email
+            && request.resource.data.memberId == resource.data.memberId
+          )
           || (signedIn()
             && isAllowedEmail()
             && request.auth.uid == uid
@@ -148,38 +177,38 @@ service cloud.firestore {
               request.resource.data.role == resource.data.role
               || (
                 !resource.data.keys().hasAny(["role"])
-                && validRole(request.resource.data.role)
+                && request.resource.data.role == "member"
               )
             ));
-        allow delete: if isGroupAdmin(groupId);
+        allow delete: if isGroupOwner(groupId);
       }
 
       match /expenses/{expenseId} {
         allow read: if isGroupMember(groupId);
         allow create: if isGroupMember(groupId);
-        allow update, delete: if isGroupAdmin(groupId);
+        allow update, delete: if isGroupOperator(groupId);
       }
 
       match /payments/{paymentId} {
         allow read: if isGroupMember(groupId);
-        allow create, update, delete: if isGroupAdmin(groupId);
+        allow create, update, delete: if isGroupOperator(groupId);
       }
 
       match /rents/{rentId} {
         allow read: if isGroupMember(groupId);
-        allow create: if isGroupAdmin(groupId)
+        allow create: if isGroupOperator(groupId)
           && validRentShape(rentId)
           && request.resource.data.createdBy is string;
-        allow update: if isGroupAdmin(groupId)
+        allow update: if isGroupOperator(groupId)
           && validRentShape(rentId)
           && request.resource.data.createdBy == resource.data.createdBy;
-        allow delete: if isGroupAdmin(groupId);
+        allow delete: if isGroupOperator(groupId);
       }
 
       match /periods/{periodId} {
         allow read: if isGroupMember(groupId);
         allow create, update: if validPeriodWrite(groupId, periodId);
-        allow delete: if isGroupAdmin(groupId);
+        allow delete: if isGroupOperator(groupId);
       }
     }
   }

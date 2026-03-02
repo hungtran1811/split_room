@@ -10,6 +10,7 @@ import {
 import { watchExpensesByRange } from "../../services/expense.service";
 import { watchPaymentsByRange } from "../../services/payment.service";
 import { watchRentByPeriod } from "../../services/rent.service";
+import { mountPrimaryNav } from "../layout/navbar";
 import { buildGrossMatrix } from "../../engine/grossMatrix";
 import { computeNetBalances } from "../../engine/netBalance";
 import { settleDebts } from "../../engine/settle";
@@ -157,7 +158,7 @@ function monthStatusCards({ expenses, payments, rent }) {
       detail: payments.length
         ? "Đã ghi nhận thanh toán."
         : "Chưa có giao dịch thanh toán.",
-      href: "#/expenses",
+      href: "#/payments",
       cta: "Mở",
     },
     {
@@ -363,21 +364,16 @@ export function renderDashboardPage() {
 
   function renderLoading() {
     app.innerHTML = `
-      <div class="container py-4" style="max-width: 980px;">
-        <div class="d-flex justify-content-between align-items-center mb-3">
-          <div>
-            <h1 class="h4 mb-1">${t("dashboard")}</h1>
-            <div class="text-secondary small">${t("loggedInAs")}: ${currentUserLabel}</div>
-            <div class="text-secondary small">${t("group")}: ${state.groupId}</div>
+      <div class="app-shell" data-page="dashboard">
+        <div class="app-shell__container">
+          <div class="app-shell__header">
+            <div class="app-shell__title-block">
+              <h1 class="app-shell__title">${t("dashboard")}</h1>
+              <div class="app-shell__meta">${t("loggedInAs")}: ${currentUserLabel}</div>
+              <div class="app-shell__meta">${t("group")}: ${state.groupId}</div>
+            </div>
+            <div id="primaryNavHost" class="app-shell__nav-host"></div>
           </div>
-          <div class="d-flex gap-2">
-            <a class="btn btn-outline-primary btn-sm" href="#/expenses">Chi tiêu</a>
-            <a class="btn btn-outline-secondary btn-sm" href="#/rent">Tiền nhà</a>
-            <button id="btnLogout" class="btn btn-outline-danger btn-sm">${t(
-              "logout",
-            )}</button>
-          </div>
-        </div>
 
         <div class="row g-2 align-items-end mb-3">
           <div class="col-6 col-md-4">
@@ -393,10 +389,16 @@ export function renderDashboardPage() {
             <div class="text-secondary small">Sẽ tự động cập nhật khi dữ liệu thay đổi.</div>
           </div>
         </div>
+        </div>
       </div>
     `;
 
-    byId("btnLogout").onclick = async () => logout();
+    mountPrimaryNav({
+      active: "dashboard",
+      isOwner: state.isOwner,
+      includeLogout: true,
+      onLogout: async () => logout(),
+    });
     byId("periodPicker").onchange = (event) => {
       period = event.target.value || currentPeriod();
       expensesReady = false;
@@ -462,21 +464,16 @@ export function renderDashboardPage() {
     });
 
     app.innerHTML = `
-      <div class="container py-4" style="max-width: 980px;">
-        <div class="d-flex justify-content-between align-items-center mb-3">
-          <div>
-            <h1 class="h4 mb-1">${t("dashboard")}</h1>
-            <div class="text-secondary small">${t("loggedInAs")}: ${currentUserLabel}</div>
-            <div class="text-secondary small">${t("group")}: ${state.groupId}</div>
+      <div class="app-shell" data-page="dashboard">
+        <div class="app-shell__container">
+          <div class="app-shell__header">
+            <div class="app-shell__title-block">
+              <h1 class="app-shell__title">${t("dashboard")}</h1>
+              <div class="app-shell__meta">${t("loggedInAs")}: ${currentUserLabel}</div>
+              <div class="app-shell__meta">${t("group")}: ${state.groupId}</div>
+            </div>
+            <div id="primaryNavHost" class="app-shell__nav-host"></div>
           </div>
-          <div class="d-flex gap-2">
-            <a class="btn btn-outline-primary btn-sm" href="#/expenses">Chi tiêu</a>
-            <a class="btn btn-outline-secondary btn-sm" href="#/rent">Tiền nhà</a>
-            <button id="btnLogout" class="btn btn-outline-danger btn-sm">${t(
-              "logout",
-            )}</button>
-          </div>
-        </div>
 
         <div class="row g-2 align-items-end mb-3">
           <div class="col-6 col-md-4">
@@ -580,10 +577,16 @@ export function renderDashboardPage() {
             ${renderSettleList(filtered)}
           </ul>
         </div>
+        </div>
       </div>
     `;
 
-    byId("btnLogout").onclick = async () => logout();
+    mountPrimaryNav({
+      active: "dashboard",
+      isOwner: state.isOwner,
+      includeLogout: true,
+      onLogout: async () => logout(),
+    });
     byId("periodPicker").onchange = (event) => {
       period = event.target.value || currentPeriod();
       expensesReady = false;

@@ -8,6 +8,7 @@ import {
   serverTimestamp,
   collection,
 } from "firebase/firestore";
+import { normalizeMemberRole } from "../core/roles";
 
 /**
  * Lưu mapping: uid/email -> memberId (hung/thao/thuy/thinh)
@@ -20,6 +21,11 @@ export async function upsertMemberProfile(
 ) {
   const ref = doc(db, "groups", groupId, "members", user.uid);
   const current = await getDoc(ref);
+  const normalizedRole = normalizeMemberRole({
+    uid: user.uid,
+    memberId,
+    role,
+  });
 
   await setDoc(
     ref,
@@ -29,7 +35,7 @@ export async function upsertMemberProfile(
       displayName: user.displayName || "",
       photoURL: user.photoURL || "",
       memberId, // ✅ quan trọng
-      role, // ✅ admin/member
+      role: normalizedRole, // ✅ owner/admin/member
       updatedAt: serverTimestamp(),
       createdAt: current.exists()
         ? current.data()?.createdAt || serverTimestamp()

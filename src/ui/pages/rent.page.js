@@ -1,7 +1,9 @@
+import { logout } from "../../services/auth.service";
 import { state } from "../../core/state";
 import { ROSTER_IDS, nameOf } from "../../config/roster";
 import { formatVND } from "../../config/i18n";
 import { showToast } from "../components/toast";
+import { mountPrimaryNav } from "../layout/navbar";
 import {
   buildEqualShares,
   clampNonNegative,
@@ -64,20 +66,19 @@ export async function renderRentPage() {
 
   const groupId = state.groupId;
   const payerId = "hung";
-  const canEdit = state.isAdmin;
+  const canEdit = state.canOperateMonth;
   const app = document.querySelector("#app");
 
   app.innerHTML = `
-    <div class="container py-4" style="max-width: 980px;" data-page="rent">
-      <div class="d-flex justify-content-between align-items-center mb-3">
-        <div>
-          <h1 class="h4 mb-1">Tiền nhà</h1>
-          <div class="text-secondary small">Người trả chủ nhà: <b>${nameOf(payerId)}</b></div>
+    <div class="app-shell" data-page="rent">
+      <div class="app-shell__container">
+        <div class="app-shell__header">
+          <div class="app-shell__title-block">
+            <h1 class="app-shell__title">Tiền nhà</h1>
+            <div class="app-shell__meta">Người trả chủ nhà: <b>${nameOf(payerId)}</b></div>
+          </div>
+          <div id="primaryNavHost" class="app-shell__nav-host"></div>
         </div>
-        <div class="d-flex gap-2">
-          <a class="btn btn-outline-secondary btn-sm" href="#/dashboard">← Về Dashboard</a>
-        </div>
-      </div>
 
       <div class="row g-2 align-items-end mb-3">
         <div class="col-6 col-md-4">
@@ -220,6 +221,15 @@ export async function renderRentPage() {
       </div>
     </div>
   `;
+
+  mountPrimaryNav({
+    active: "rent",
+    isOwner: state.isOwner,
+    includeLogout: true,
+    onLogout: async () => {
+      await logout();
+    },
+  });
 
   const page = app.querySelector('[data-page="rent"]');
   const periodEl = byId("rentPeriod");

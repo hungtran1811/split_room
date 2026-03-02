@@ -1,146 +1,92 @@
+import { logout } from "../../services/auth.service";
 import { state } from "../../core/state";
-import { mapFirestoreError } from "../../core/errors";
 import { ROSTER, ROSTER_IDS, nameOf } from "../../config/roster";
 import { getCurrentUserLabel, getUserLabel } from "../../core/display-name";
 import { formatVND } from "../../config/i18n";
-import { openPaymentModal } from "../components/paymentModal";
+import { parseVndInput } from "../../core/money";
+import { mapFirestoreError } from "../../core/errors";
 import { showToast } from "../components/toast";
 import { openConfirmModal } from "../components/confirmModal";
 import { openExpenseEditModal } from "../components/expenseEditModal";
-
+import { mountPrimaryNav } from "../layout/navbar";
 import {
   addExpense,
   removeExpense,
   updateExpense,
-  watchExpensesByRange,
 } from "../../services/expense.service";
-import {
-  addPayment,
-  removePayment,
-  watchPaymentsByRange,
-  updatePayment,
-} from "../../services/payment.service";
+import { watchMonthExpenses } from "../../services/month-ops.service";
 
-import { buildGrossMatrix } from "../../engine/grossMatrix";
-import { computeNetBalances } from "../../engine/netBalance";
-import { settleDebts } from "../../engine/settle";
-import { renderMatrixTable } from "../components/matrixTable";
-
-function $(id) {
+function byId(id) {
   return document.getElementById(id);
 }
 
+function currentPeriod() {
+  const date = new Date();
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  return `${year}-${month}`;
+}
+
 function periodToYmd(period) {
-  // period: "YYYY-MM" -> "YYYY-MM-01"
   return `${period}-01`;
+}
+
+function todayYmd() {
+  const date = new Date();
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function creatorLabel(uid) {
   if (!uid) return "-";
 
-  const member = (state.members || []).find((item) => item.uid === uid || item.id === uid);
+  const member = (state.members || []).find(
+    (item) => item.uid === uid || item.id === uid,
+  );
   if (member) return getUserLabel(member);
-
-  if (state.user?.uid === uid) {
-    return getCurrentUserLabel(state);
-  }
+  if (state.user?.uid === uid) return getCurrentUserLabel(state);
 
   return uid;
 }
 
-// Nhập VNĐ: chấp nhận 10000, 10.000, 10,5, 10.000,5
-function parseVndInput(s) {
-  if (s === null || s === undefined) return 0;
-  let x = String(s).trim();
-  if (!x) return 0;
-
-  // bỏ ký tự tiền tệ
-  x = x.replace(/[₫đ\s]/gi, "");
-
-  // nếu có cả "." và "," -> "." là ngăn cách nghìn, "," là thập phân
-  if (x.includes(".") && x.includes(",")) {
-    x = x.replaceAll(".", "").replace(",", ".");
-  } else {
-    // nếu chỉ có "," -> coi là thập phân
-    if (x.includes(",")) x = x.replace(",", ".");
-    // nếu chỉ có "." -> có thể là thập phân hoặc nghìn; mặc định: nếu nhiều dấu "." -> nghìn
-    const dots = (x.match(/\./g) || []).length;
-    if (dots >= 2) x = x.replaceAll(".", "");
-  }
-
-  const n = Number(x);
-  return Number.isFinite(n) ? n : 0;
-}
-
-function getMonthRange(period) {
-  // period: "YYYY-MM"
-  const [y, m] = period.split("-").map(Number);
-  const start = `${String(y).padStart(4, "0")}-${String(m).padStart(2, "0")}-01`;
-
-  // end = first day of next month
-  const d = new Date(y, m - 1, 1);
-  d.setMonth(d.getMonth() + 1);
-  const endY = d.getFullYear();
-  const endM = String(d.getMonth() + 1).padStart(2, "0");
-  const end = `${endY}-${endM}-01`;
-  return { start, end };
-}
-
-function currentPeriod() {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  return `${y}-${m}`;
-}
-
-function todayYmd() {
-  const d = new Date();
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}`;
-}
-
-let _unsubExpenses = null;
-let _unsubPayments = null;
-
-const live = {
-  expenses: [],
-  payments: [],
-};
-
 export async function renderExpensesPage() {
-  const app = document.querySelector("#app");
-  if (!state.user) return;
-  const admin = state.isAdmin;
-  const payLocks = new Set(); // chống double submit
+  if (!state.user || !state.groupId) return;
 
-  // ====== UI: 1 cột dọc, rõ ràng, không “chốt sổ” rối
+  const app = document.querySelector("#app");
+  const groupId = state.groupId;
+  const canManageEntries = state.canOperateMonth;
+  let selectedPeriod = currentPeriod();
+  let expensesCollapsed = false;
+  let unsubscribeExpenses = null;
+  let liveExpenses = [];
+
   app.innerHTML = `
-    <div class="container py-4" style="max-width: 980px;">
-      <div class="d-flex justify-content-between align-items-center mb-3">
-        <div>
-          <h1 class="h4 mb-1">Chi tiêu & Cấn trừ</h1>
-          <div class="text-secondary small">Nhóm: <b>${state.groupId || "-"}</b></div>
+    <div class="app-shell" data-page="expenses">
+      <div class="app-shell__container">
+        <div class="app-shell__header">
+          <div class="app-shell__title-block">
+            <h1 class="app-shell__title">Chi tiêu</h1>
+            <div class="app-shell__meta">Nhóm: <b>${groupId}</b></div>
+          </div>
+          <div id="primaryNavHost" class="app-shell__nav-host"></div>
         </div>
-        <a class="btn btn-outline-secondary btn-sm" href="#/dashboard">← Về Tổng quan</a>
-      </div>
 
       <div class="row g-2 align-items-end">
         <div class="col-6 col-md-4">
           <label class="form-label small mb-1">Chọn tháng</label>
-          <input id="periodPicker" type="month" class="form-control" />
+          <input id="periodPicker" type="month" class="form-control" value="${selectedPeriod}" />
         </div>
         <div class="col-12">
           <div class="small text-secondary mt-2">
-            Dữ liệu chi tiêu & thanh toán sẽ lọc theo tháng bạn chọn.
+            Trang này chỉ còn quản lý chi tiêu theo tháng. Thanh toán theo cấn trừ nằm trong trang Thanh toán.
           </div>
         </div>
       </div>
 
       <hr class="my-3"/>
 
-      <!-- FORM THÊM CHI -->
       <div class="card mb-3">
         <div class="card-header">Thêm khoản chi</div>
         <div class="card-body">
@@ -159,7 +105,7 @@ export async function renderExpensesPage() {
             <div class="col-md-4">
               <label class="form-label">Người trả</label>
               <select id="exPayer" class="form-select">
-                ${ROSTER.map((m) => `<option value="${m.id}">${m.name}</option>`).join("")}
+                ${ROSTER.map((member) => `<option value="${member.id}">${member.name}</option>`).join("")}
               </select>
             </div>
 
@@ -167,18 +113,18 @@ export async function renderExpensesPage() {
               <label class="form-label mb-2">Người tham gia (tick)</label>
               <div class="row g-2">
                 ${ROSTER.map(
-                  (m) => `
-                  <div class="col-6 col-md-3">
-                    <div class="form-check">
-                      <input class="form-check-input exPart" type="checkbox" id="p_${m.id}" data-id="${m.id}" checked>
-                      <label class="form-check-label" for="p_${m.id}">${m.name}</label>
+                  (member) => `
+                    <div class="col-6 col-md-3">
+                      <div class="form-check">
+                        <input class="form-check-input exPart" type="checkbox" id="p_${member.id}" data-id="${member.id}" checked>
+                        <label class="form-check-label" for="p_${member.id}">${member.name}</label>
+                      </div>
                     </div>
-                  </div>
-                `,
+                  `,
                 ).join("")}
               </div>
               <div class="form-text">
-                Nếu người trả cũng tham gia, cứ tick bình thường. Engine sẽ tự tính “phần người trả”.
+                Nếu người trả cũng tham gia, cứ tick bình thường. Engine sẽ tự tính phần của người trả.
               </div>
             </div>
 
@@ -189,7 +135,7 @@ export async function renderExpensesPage() {
                   <label class="form-check-label" for="exEqual">Chia đều</label>
                 </div>
                 <div class="small text-secondary">
-                  (Bỏ tick để tuỳ chỉnh số tiền nợ cho từng người)
+                  Bỏ tick để tùy chỉnh số tiền nợ cho từng người.
                 </div>
               </div>
             </div>
@@ -200,15 +146,15 @@ export async function renderExpensesPage() {
                 <div class="card-body">
                   <div id="debtsBox" class="row g-3"></div>
                   <div class="mt-2 small">
-                    <div>👉 Tổng nợ của người khác: <b id="sumDebts">0 ₫</b></div>
-                    <div>👉 Phần của người trả (tự tính): <b id="payerShare">0 ₫</b></div>
+                    <div>Tổng nợ của người khác: <b id="sumDebts">0 đ</b></div>
+                    <div>Phần của người trả (tự tính): <b id="payerShare">0 đ</b></div>
                   </div>
                 </div>
               </div>
             </div>
 
             <div class="col-12">
-              <label class="form-label">Ghi chú (tuỳ chọn)</label>
+              <label class="form-label">Ghi chú (tùy chọn)</label>
               <input id="exNote" class="form-control" placeholder="VD: Ăn uống, Đi chợ, ..."/>
             </div>
 
@@ -221,226 +167,177 @@ export async function renderExpensesPage() {
         </div>
       </div>
 
-      <!-- DANH SÁCH CHI -->
       <div class="card mb-3">
         <div class="card-header d-flex justify-content-between align-items-center">
           <div>Danh sách chi tiêu</div>
-          <button id="btnToggleExpenses" class="btn btn-outline-secondary btn-sm" type="button">
-            Ẩn
-          </button>
+          <button id="btnToggleExpenses" class="btn btn-outline-secondary btn-sm" type="button">Ẩn</button>
         </div>
-        <div class="card-body" id="expensesListWrap">
+        <div class="card-body" id="expensesListWrap" style="max-height: 400px; overflow-y: auto; overflow-x: hidden;">
           <div id="expensesList" class="small text-secondary">Đang tải...</div>
-        </div>
-      </div>
-
-
-      <!-- TỔNG KẾT NỢ (1 cột, rõ ràng) -->
-      <div id="engineResult" class="mb-3"></div>
-
-      <!-- LỊCH SỬ THANH TOÁN -->
-      <div class="card">
-        <div class="card-header">Lịch sử thanh toán</div>
-        <div class="card-body">
-          <div id="paymentsList" class="text-secondary small">Đang tải...</div>
         </div>
       </div>
     </div>
   `;
 
-  // Toggle danh sách chi tiêu (ẩn/hiện)
-  let expensesCollapsed = false;
-
-  const btnToggle = document.getElementById("btnToggleExpenses");
-  const wrap = document.getElementById("expensesListWrap");
-  // scroll trong khung danh sách chi tiêu
-  wrap.style.maxHeight = "400px";
-  wrap.style.overflowY = "auto";
-  wrap.style.overflowX = "hidden";
-
-  btnToggle?.addEventListener("click", () => {
-    expensesCollapsed = !expensesCollapsed;
-    if (expensesCollapsed) {
-      wrap.style.display = "none";
-      btnToggle.textContent = "Hiện";
-    } else {
-      wrap.style.display = "block";
-      btnToggle.textContent = "Ẩn";
-    }
+  mountPrimaryNav({
+    active: "expenses",
+    isOwner: state.isOwner,
+    includeLogout: true,
+    onLogout: async () => {
+      await logout();
+    },
   });
 
-  // ====== Render debts inputs
+  function setMessage(text = "") {
+    byId("msg").textContent = text;
+  }
+
+  function getParticipantIds() {
+    return [...document.querySelectorAll(".exPart")]
+      .filter((checkbox) => checkbox.checked)
+      .map((checkbox) => checkbox.dataset.id);
+  }
+
+  function getDebtsFromInputs(payerId) {
+    const debts = {};
+
+    document.querySelectorAll(".debtInput").forEach((input) => {
+      const memberId = input.dataset.id;
+      if (memberId === payerId || input.disabled) return;
+
+      const value = parseVndInput(input.value);
+      if (value > 0) {
+        debts[memberId] = value;
+      }
+    });
+
+    return debts;
+  }
+
+  function recalcTotals() {
+    const amount = parseVndInput(byId("exAmount").value);
+    const payerId = byId("exPayer").value;
+    const debts = getDebtsFromInputs(payerId);
+    const sumDebts = Object.values(debts).reduce((sum, value) => sum + value, 0);
+    const payerShare = amount - sumDebts;
+
+    byId("sumDebts").textContent = formatVND(sumDebts);
+    byId("payerShare").textContent = formatVND(payerShare);
+  }
+
   function renderDebtsInputs() {
-    const payerId = $("exPayer").value;
-    const amount = parseVndInput($("exAmount").value);
-    const isEqual = $("exEqual").checked;
+    const payerId = byId("exPayer").value;
+    const amount = parseVndInput(byId("exAmount").value);
+    const equalSplit = byId("exEqual").checked;
+    const participants = getParticipantIds();
+    const participantCount = participants.length;
+    const debtors = participants.filter((memberId) => memberId !== payerId);
+    const eachShare = participantCount > 0 ? amount / participantCount : 0;
+    const box = byId("debtsBox");
 
-    const participantIds = [...document.querySelectorAll(".exPart")]
-      .filter((c) => c.checked)
-      .map((c) => c.dataset.id);
+    box.innerHTML = ROSTER_IDS.filter((memberId) => memberId !== payerId)
+      .map((memberId) => {
+        const active = debtors.includes(memberId);
+        const value = equalSplit && active ? eachShare : 0;
 
-    const nParticipants = participantIds.length || 0;
-    const box = $("debtsBox");
-    box.innerHTML = "";
-
-    // Debtors = participants excluding payer
-    const debtorIds = participantIds.filter((id) => id !== payerId);
-
-    // Equal split: mỗi người tham gia 1 phần bằng nhau
-    const eachShare = nParticipants > 0 ? amount / nParticipants : 0;
-
-    for (const id of ROSTER_IDS) {
-      if (id === payerId) continue;
-      const active = debtorIds.includes(id);
-      const val = isEqual && active ? eachShare : 0;
-
-      box.innerHTML += `
-        <div class="col-12 col-md-6">
-          <label class="form-label">${nameOf(id)} nợ ${nameOf(payerId)}</label>
-          <input
-            class="form-control debtInput"
-            data-id="${id}"
-            ${active ? "" : "disabled"}
-            value="${active ? String(val) : "0"}"
-            placeholder="0"
-          />
-          <div class="form-text">${active ? "Đang tham gia" : "Không tham gia"}</div>
-        </div>
-      `;
-    }
+        return `
+          <div class="col-12 col-md-6">
+            <label class="form-label">${nameOf(memberId)} nợ ${nameOf(payerId)}</label>
+            <input
+              class="form-control debtInput"
+              data-id="${memberId}"
+              ${active ? "" : "disabled"}
+              value="${active ? String(value) : "0"}"
+              placeholder="0"
+            />
+            <div class="form-text">${active ? "Đang tham gia" : "Không tham gia"}</div>
+          </div>
+        `;
+      })
+      .join("");
 
     recalcTotals();
   }
 
-  function recalcTotals() {
-    const amount = parseVndInput($("exAmount").value);
-    const payerId = $("exPayer").value;
-
-    const debts = getDebtsFromInputs(payerId);
-    const sum = Object.values(debts).reduce((a, b) => a + b, 0);
-    const payerShare = amount - sum;
-
-    $("sumDebts").textContent = formatVND(sum);
-    $("payerShare").textContent = formatVND(payerShare);
-  }
-
-  function getDebtsFromInputs(payerId) {
-    const obj = {};
-    for (const el of document.querySelectorAll(".debtInput")) {
-      const id = el.dataset.id;
-      if (id === payerId) continue;
-      if (el.disabled) continue;
-      const v = parseVndInput(el.value);
-      if (v > 0) obj[id] = v;
-    }
-    return obj;
-  }
-
-  function setMsg(text = "") {
-    $("msg").textContent = text;
-  }
-
-  // listeners
-  $("exPayer").addEventListener("change", renderDebtsInputs);
-  $("exAmount").addEventListener("input", () => {
-    if ($("exEqual").checked) renderDebtsInputs();
-    else recalcTotals();
-  });
-  $("exEqual").addEventListener("change", renderDebtsInputs);
-  document
-    .querySelectorAll(".exPart")
-    .forEach((c) => c.addEventListener("change", renderDebtsInputs));
-  document.addEventListener("input", (e) => {
-    if (e.target?.classList?.contains("debtInput")) recalcTotals();
-  });
-
-  $("btnResetExpense").onclick = () => {
-    $("exDate").value = todayYmd();
-    $("exAmount").value = "";
-    $("exNote").value = "";
-    document.querySelectorAll(".exPart").forEach((c) => (c.checked = true));
-    $("exEqual").checked = true;
-    setMsg("");
+  function resetForm() {
+    byId("exDate").value = periodToYmd(selectedPeriod);
+    byId("exAmount").value = "";
+    byId("exNote").value = "";
+    document.querySelectorAll(".exPart").forEach((checkbox) => {
+      checkbox.checked = true;
+    });
+    byId("exEqual").checked = true;
+    setMessage("");
     renderDebtsInputs();
-  };
+  }
 
-  $("btnSaveExpense").onclick = async () => {
-    setMsg("");
-    const groupId = state.groupId;
-    if (!groupId) return setMsg("Thiếu groupId. Hãy đăng nhập lại.");
+  async function saveExpense() {
+    const date = byId("exDate").value || periodToYmd(selectedPeriod);
+    const amount = parseVndInput(byId("exAmount").value);
+    const payerId = byId("exPayer").value;
+    const note = byId("exNote").value.trim();
+    const participants = getParticipantIds();
 
-    const date = $("exDate").value || todayYmd();
-    const amount = parseVndInput($("exAmount").value);
-    const payerId = $("exPayer").value;
-    const note = $("exNote").value.trim();
-
-    if (!amount || amount <= 0) return setMsg("Số tiền phải > 0.");
-    if (!payerId) return setMsg("Chọn người trả.");
-
-    const participantIds = [...document.querySelectorAll(".exPart")]
-      .filter((c) => c.checked)
-      .map((c) => c.dataset.id);
-
-    if (participantIds.length === 0)
-      return setMsg("Phải tick ít nhất 1 người tham gia.");
+    if (!amount || amount <= 0) {
+      setMessage("Số tiền phải lớn hơn 0.");
+      return;
+    }
+    if (!payerId) {
+      setMessage("Hãy chọn người trả.");
+      return;
+    }
+    if (!participants.length) {
+      setMessage("Phải chọn ít nhất một người tham gia.");
+      return;
+    }
 
     const debts = getDebtsFromInputs(payerId);
+    const sumDebts = Object.values(debts).reduce((sum, value) => sum + value, 0);
+    if (sumDebts - amount > 0.000001) {
+      setMessage("Tổng nợ của người khác không được lớn hơn tổng tiền.");
+      return;
+    }
 
-    if (debts[payerId])
-      return setMsg("Người trả không được nằm trong danh sách nợ.");
+    const button = byId("btnSaveExpense");
+    button.disabled = true;
+    button.textContent = "Đang lưu...";
+    setMessage("");
 
-    const sumDebts = Object.values(debts).reduce((a, b) => a + b, 0);
-    if (sumDebts - amount > 0.000001)
-      return setMsg("Tổng nợ của người khác không được lớn hơn tổng tiền.");
-
-    const btn = $("btnSaveExpense");
-    btn.disabled = true;
-    btn.textContent = "Đang lưu...";
     try {
       await addExpense(groupId, {
         date,
         amount,
         payerId,
-        participants: participantIds,
+        participants,
         debts,
         note,
         createdBy: state.user.uid,
       });
 
-      // reset form
-      $("exAmount").value = "";
-      $("exNote").value = "";
-      setMsg("");
-
-      // ✅ Toast thành công
       showToast({
         title: "Thành công",
         message: "Đã lưu khoản chi.",
         variant: "success",
       });
-
-      // (tuỳ chọn) cập nhật lại debts box cho sạch số
-      renderDebtsInputs();
-    } catch (e) {
-      console.error(e);
-      const message = mapFirestoreError(e, "Lưu thất bại.");
-      setMsg(message);
-
-      // ✅ Toast thất bại
+      resetForm();
+    } catch (error) {
+      const message = mapFirestoreError(error, "Lưu thất bại.");
+      setMessage(message);
       showToast({
         title: "Thất bại",
         message,
         variant: "danger",
       });
     } finally {
-      const btn = $("btnSaveExpense");
-      btn.disabled = false;
-      btn.textContent = "Lưu chi tiêu";
+      button.disabled = false;
+      button.textContent = "Lưu chi tiêu";
     }
-  };
+  }
 
   function renderExpensesList(expenses) {
-    const wrap = $("expensesList");
+    const wrap = byId("expensesList");
+    if (!wrap) return;
+
     if (!expenses.length) {
       wrap.innerHTML = `<div class="text-secondary">Chưa có chi tiêu.</div>`;
       return;
@@ -450,93 +347,94 @@ export async function renderExpensesPage() {
       <div class="list-group">
         ${expenses
           .map(
-            (e) => `
-          <div class="list-group-item">
-            <div class="d-flex justify-content-between align-items-start">
-              <div>
-                <div class="fw-semibold">${e.date} • ${formatVND(e.amount)}</div>
-                <div class="text-secondary">Người trả: <b>${nameOf(e.payerId)}</b>${e.note ? ` • ${e.note}` : ""}</div>
-                <div class="text-secondary small">
-                  Người tạo: <b>${creatorLabel(e.createdBy)}</b>
-                </div>
-                <div class="small text-secondary mt-1">
-                  Nợ: ${
-                    Object.entries(e.debts || {}).length
-                      ? Object.entries(e.debts)
-                          .map(([id, v]) => `${nameOf(id)} ${formatVND(v)}`)
-                          .join(" • ")
-                      : "Không có"
+            (expense) => `
+              <div class="list-group-item">
+                <div class="d-flex justify-content-between align-items-start gap-3">
+                  <div>
+                    <div class="fw-semibold">${expense.date} • ${formatVND(expense.amount)}</div>
+                    <div class="text-secondary">Người trả: <b>${nameOf(expense.payerId)}</b>${expense.note ? ` • ${expense.note}` : ""}</div>
+                    <div class="text-secondary small">Người tạo: <b>${creatorLabel(expense.createdBy)}</b></div>
+                    <div class="small text-secondary mt-1">
+                      Nợ:
+                      ${
+                        Object.entries(expense.debts || {}).length
+                          ? Object.entries(expense.debts || {})
+                              .map(([memberId, value]) => `${nameOf(memberId)} ${formatVND(value)}`)
+                              .join(" • ")
+                          : "Không có"
+                      }
+                    </div>
+                  </div>
+                  ${
+                    canManageEntries
+                      ? `
+                        <div class="d-flex gap-2">
+                          <button class="btn btn-outline-secondary btn-sm" data-edit-expense="${expense.id}">Sửa</button>
+                          <button class="btn btn-outline-danger btn-sm" data-delete-expense="${expense.id}">Xóa</button>
+                        </div>
+                      `
+                      : ""
                   }
                 </div>
               </div>
-              ${
-                admin
-                  ? `
-                    <div class="d-flex gap-2">
-                      <button class="btn btn-outline-secondary btn-sm" data-editex="${e.id}">Sửa</button>
-                      <button class="btn btn-outline-danger btn-sm" data-del="${e.id}">Xoá</button>
-                    </div>
-                  `
-                  : ``
-              }
-
-              
-            </div>
-          </div>
-        `,
+            `,
           )
           .join("")}
       </div>
     `;
 
-    wrap.querySelectorAll("[data-del]").forEach((btn) => {
-      btn.onclick = async () => {
-        const id = btn.getAttribute("data-del");
-        const e = expenses.find((x) => x.id === id);
+    if (!canManageEntries) return;
+
+    wrap.querySelectorAll("[data-delete-expense]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const expense = liveExpenses.find(
+          (item) => item.id === button.getAttribute("data-delete-expense"),
+        );
+        if (!expense) return;
 
         openConfirmModal({
           title: "Xóa khoản chi",
           message: "Bạn chắc chắn muốn xóa khoản chi này?",
-          meta: e
-            ? `${e.date} • ${formatVND(e.amount)} • Người trả: ${nameOf(e.payerId)}`
-            : "",
+          meta: `${expense.date} • ${formatVND(expense.amount)} • Người trả: ${nameOf(expense.payerId)}`,
           okText: "Xóa",
           danger: true,
           onConfirm: async () => {
             try {
-              await removeExpense(state.groupId, id);
+              await removeExpense(groupId, expense.id);
               showToast({
                 title: "Thành công",
                 message: "Đã xóa khoản chi.",
                 variant: "success",
               });
-            } catch (err) {
-              // createPayment đã có toast fail, còn xóa thì thêm tại đây
+            } catch (error) {
               showToast({
                 title: "Thất bại",
-                message: mapFirestoreError(err, "Không thể xóa khoản chi."),
+                message: mapFirestoreError(
+                  error,
+                  "Không thể xóa khoản chi.",
+                ),
                 variant: "danger",
               });
-              throw err;
+              throw error;
             }
           },
         });
-      };
+      });
     });
 
-    wrap.querySelectorAll("[data-editex]").forEach((btn) => {
-      btn.onclick = async () => {
-        const id = btn.getAttribute("data-editex");
-        const e = expenses.find((x) => x.id === id);
-        if (!e) return;
+    wrap.querySelectorAll("[data-edit-expense]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const expense = liveExpenses.find(
+          (item) => item.id === button.getAttribute("data-edit-expense"),
+        );
+        if (!expense) return;
 
         openExpenseEditModal({
           title: "Sửa chi tiêu (ngày/ghi chú)",
-          date: e.date,
-          note: e.note || "",
+          date: expense.date,
+          note: expense.note || "",
           onSubmit: async ({ date, note }) => {
-            await updateExpense(state.groupId, id, { date, note });
-
+            await updateExpense(groupId, expense.id, { date, note });
             showToast({
               title: "Thành công",
               message: "Đã cập nhật chi tiêu.",
@@ -544,413 +442,64 @@ export async function renderExpensesPage() {
             });
           },
         });
-      };
+      });
     });
   }
 
-  function renderPaymentsList(payments) {
-    const wrap = $("paymentsList");
-    if (!payments.length) {
-      wrap.innerHTML = `<div class="text-secondary">Chưa có thanh toán.</div>`;
+  function startWatch() {
+    unsubscribeExpenses?.();
+    unsubscribeExpenses = watchMonthExpenses(groupId, selectedPeriod, (items) => {
+      liveExpenses = items;
+      renderExpensesList(items);
+    });
+  }
+
+  byId("periodPicker").addEventListener("change", (event) => {
+    selectedPeriod = event.target.value || currentPeriod();
+    byId("exDate").value = periodToYmd(selectedPeriod);
+    startWatch();
+  });
+
+  byId("btnToggleExpenses").addEventListener("click", () => {
+    expensesCollapsed = !expensesCollapsed;
+    byId("expensesListWrap").style.display = expensesCollapsed ? "none" : "block";
+    byId("btnToggleExpenses").textContent = expensesCollapsed ? "Hiện" : "Ẩn";
+  });
+
+  byId("exPayer").addEventListener("change", renderDebtsInputs);
+  byId("exAmount").addEventListener("input", () => {
+    if (byId("exEqual").checked) {
+      renderDebtsInputs();
       return;
     }
 
-    wrap.innerHTML = `
-      <div class="list-group">
-        ${payments
-          .map(
-            (p) => `
-          <div class="list-group-item">
-            <div class="d-flex justify-content-between align-items-start">
-              <div>
-                <div class="fw-semibold">${p.date} • ${nameOf(p.fromId)} → ${nameOf(p.toId)} • ${formatVND(p.amount)}</div>
-                <div class="text-secondary small">${p.note ? p.note : ""}</div>
-              </div>
-              <div class="d-flex gap-2">
-                ${admin ? `<button class="btn btn-outline-secondary btn-sm" data-editpay="${p.id}">Sửa</button>` : ``}
-                ${admin ? `<button class="btn btn-outline-danger btn-sm" data-delpay="${p.id}">Xoá</button>` : ``}
-              </div>
-            </div>
-          </div>
-        `,
-          )
-          .join("")}
-      </div>
-    `;
-
-    wrap.querySelectorAll("[data-delpay]").forEach((btn) => {
-      btn.onclick = async () => {
-        const id = btn.getAttribute("data-delpay");
-        const p = payments.find((x) => x.id === id);
-
-        openConfirmModal({
-          title: "Xóa thanh toán",
-          message: "Bạn chắc chắn muốn xóa thanh toán này?",
-          meta: p
-            ? `${p.date} • ${nameOf(p.fromId)} → ${nameOf(p.toId)} • ${formatVND(p.amount)}`
-            : "",
-          okText: "Xóa",
-          danger: true,
-          onConfirm: async () => {
-            try {
-              await removePayment(state.groupId, id);
-              showToast({
-                title: "Thành công",
-                message: "Đã xóa thanh toán.",
-                variant: "success",
-              });
-            } catch (err) {
-              showToast({
-                title: "Thất bại",
-                message: mapFirestoreError(err, "Không thể xóa thanh toán."),
-                variant: "danger",
-              });
-              throw err;
-            }
-          },
-        });
-      };
-    });
-
-    wrap.querySelectorAll("[data-editpay]").forEach((btn) => {
-      btn.onclick = async () => {
-        const id = btn.getAttribute("data-editpay");
-        const p = payments.find((x) => x.id === id);
-        if (!p) return;
-
-        // ✅ mở modal (tái sử dụng)
-        openPaymentModal({
-          title: "Sửa thanh toán",
-          fromName: nameOf(p.fromId),
-          toName: nameOf(p.toId),
-          amount: Number(p.amount || 0),
-          lockAmount: false,
-          maxAmount: null,
-          defaultNote: p.note || "",
-          parseVndInput,
-          onSubmit: async ({ amount: amt, note }) => {
-            await updatePayment(state.groupId, id, {
-              amount: amt,
-              note: note || "",
-              // ✅ Nếu bạn muốn cho sửa ngày thì thêm UI khác,
-              // còn hiện tại giữ nguyên p.date
-            });
-
-            showToast({
-              title: "Thành công",
-              message: "Đã cập nhật thanh toán.",
-              variant: "success",
-            });
-          },
-        });
-      };
-    });
-  }
-
-  // Áp thanh toán vào balances để phản ánh tiền đã trả
-  function applyPaymentsToBalances(balances, payments) {
-    const out = { ...balances };
-
-    for (const p of payments) {
-      const from = p.fromId;
-      const to = p.toId;
-      const amt = Number(p.amount || 0);
-
-      if (!from || !to || !Number.isFinite(amt) || amt <= 0) continue;
-
-      // Người trả: bớt nợ => balance tăng
-      out[from] = (out[from] ?? 0) + amt;
-
-      // Người nhận: bớt phải thu => balance giảm
-      out[to] = (out[to] ?? 0) - amt;
+    recalcTotals();
+  });
+  byId("exEqual").addEventListener("change", renderDebtsInputs);
+  document.querySelectorAll(".exPart").forEach((checkbox) => {
+    checkbox.addEventListener("change", renderDebtsInputs);
+  });
+  byId("debtsBox").addEventListener("input", (event) => {
+    if (event.target?.classList?.contains("debtInput")) {
+      recalcTotals();
     }
-
-    return out;
-  }
-
-  // build ma trận "còn phải trả" từ kết quả cấn trừ
-  function buildSettleMatrix(memberIds, settle) {
-    const m = {};
-    for (const a of memberIds) {
-      m[a] = {};
-      for (const b of memberIds) m[a][b] = 0;
-    }
-
-    for (const s of settle || []) {
-      const from = s.fromId ?? s.from ?? s.debtorId;
-      const to = s.toId ?? s.to ?? s.creditorId;
-      const amt = Number(s.amount ?? s.amt ?? 0);
-      if (!from || !to || !Number.isFinite(amt) || amt <= 0) continue;
-      if (!m[from]) continue;
-      m[from][to] += amt;
-    }
-
-    return m;
-  }
-
-  function renderEngineFromData(expenses, payments) {
-    const memberIds = ROSTER_IDS;
-
-    // 1) Ma trận nợ gốc chỉ từ chi tiêu
-    const gross = buildGrossMatrix(memberIds, expenses);
-
-    // 2) Nợ ròng từ ma trận gốc
-    let balances = computeNetBalances(memberIds, gross);
-
-    // 3) Trừ thanh toán vào balances (tiền thực tế đã trả)
-    balances = applyPaymentsToBalances(balances, payments || []);
-
-    // 4) Cấn trừ từ balances đã trừ payment
-    const settle = settleDebts(balances);
-
-    // 5) Ma trận sau cấn trừ (để kiểm chứng) -> build từ settle list
-    const settleMatrix = buildSettleMatrix(memberIds, settle);
-
-    // UI blocks
-    const grossHtml = renderMatrixTable({
-      members: ROSTER,
-      matrix: gross,
-      title: "Ma trận nợ gốc (từ chi tiêu)",
-    });
-
-    const balancesHtml = `
-      <ul class="list-group">
-        ${Object.entries(balances)
-          .map(([id, b]) => {
-            const label = b > 0 ? "Được nhận" : b < 0 ? "Phải trả" : "Cân bằng";
-            return `
-              <li class="list-group-item d-flex justify-content-between">
-                <span>${nameOf(id)}</span>
-                <span class="fw-semibold">${label}: ${formatVND(Math.abs(b))}</span>
-              </li>
-            `;
-          })
-          .join("")}
-      </ul>
-    `;
-
-    const settleHtml = `
-      <ul class="list-group">
-        ${
-          settle.length
-            ? settle
-                .map((s) => {
-                  const fromId = s.fromId ?? s.from ?? s.debtorId;
-                  const toId = s.toId ?? s.to ?? s.creditorId;
-                  const amount = Number(s.amount ?? s.amt ?? 0);
-
-                  return `
-                    <li class="list-group-item d-flex justify-content-between align-items-center">
-                      <div>
-                        <div class="fw-semibold">${nameOf(fromId)} → ${nameOf(toId)}: ${formatVND(amount)}</div>
-                        <div class="small text-secondary">Chuyển khoản theo danh sách này để hết nợ nhanh nhất.</div>
-                      </div>
-                      
-                      ${
-                        admin
-                          ? `
-                          <div class="d-flex gap-2">
-                            <button class="btn btn-outline-success btn-sm" data-payfull="${fromId}|${toId}|${amount}">Đã trả đủ</button>
-                            <button class="btn btn-outline-primary btn-sm" data-paypart="${fromId}|${toId}|${amount}">Trả...</button>
-                          </div>
-                        `
-                          : `<div class="small text-secondary">Chỉ quản trị viên mới được ghi nhận thanh toán.</div>`
-                      }
-                    </li>
-                  `;
-                })
-                .join("")
-            : `<li class="list-group-item text-secondary">Không có khoản nợ nào</li>`
-        }
-      </ul>
-    `;
-
-    const afterHtml = renderMatrixTable({
-      members: ROSTER,
-      matrix: settleMatrix,
-      title: "Ma trận sau cấn trừ (kiểm chứng)",
-    });
-
-    // Render: 1 cột, theo flow dễ đọc
-    $("engineResult").innerHTML = `
-      <div class="card">
-        <div class="card-header">
-          <b>Tổng kết nợ</b>
-          <div class="small text-secondary">Xem theo thứ tự: Nợ gốc → Nợ ròng → Cấn trừ</div>
-        </div>
-        <div class="card-body">
-
-          <div class="mb-3">
-            <div class="fw-semibold mb-2">1) Nợ thô (trước cấn trừ)</div>
-            ${grossHtml}
-          </div>
-
-          <div class="mb-3">
-            <div class="fw-semibold mb-2">2) Nợ ròng của từng người</div>
-            ${balancesHtml}
-          </div>
-
-          <div class="mb-3">
-            <div class="fw-semibold mb-2">3) Kết quả cấn trừ (ai trả ai)</div>
-            ${settleHtml}
-          </div>
-
-          <details class="mt-2">
-            <summary class="small text-secondary">Xem ma trận sau cấn trừ (kiểm chứng)</summary>
-            <div class="mt-2">${afterHtml}</div>
-          </details>
-
-        </div>
-      </div>
-    `;
-
-    bindPaymentButtons();
-  }
-
-  function bindPaymentButtons() {
-    if (!state.isAdmin) return;
-
-    // helper: lock theo giao dịch
-    const lockKey = (fromId, toId) => `${fromId}__${toId}`;
-    const withLock = async (key, fn) => {
-      if (payLocks.has(key)) return;
-      payLocks.add(key);
-      try {
-        await fn();
-      } finally {
-        payLocks.delete(key);
-      }
-    };
-
-    // trả đủ (KHÓA số tiền)
-    document.querySelectorAll("[data-payfull]").forEach((btn) => {
-      btn.onclick = async () => {
-        const [fromId, toId, amountStr] = btn
-          .getAttribute("data-payfull")
-          .split("|");
-        const amount = Number(amountStr);
-        const key = lockKey(fromId, toId);
-
-        await withLock(key, async () => {
-          openPaymentModal({
-            title: "Trả đủ theo cấn trừ",
-            fromName: nameOf(fromId),
-            toName: nameOf(toId),
-            amount, // default = đúng settle
-            maxAmount: amount, // phòng trường hợp dev đổi lock
-            lockAmount: true, // ✅ khóa input
-            defaultNote: "Trả đủ theo cấn trừ",
-            parseVndInput,
-            onSubmit: async ({ amount: amt, note }) => {
-              await createPayment(
-                fromId,
-                toId,
-                amt,
-                note || "Trả đủ theo cấn trừ",
-              );
-              showToast({
-                title: "Thành công",
-                message: "Đã ghi nhận thanh toán.",
-                variant: "success",
-              });
-            },
-          });
-        });
-      };
-    });
-
-    // trả một phần (GIỚI HẠN <= max)
-    document.querySelectorAll("[data-paypart]").forEach((btn) => {
-      btn.onclick = async () => {
-        const [fromId, toId, amountStr] = btn
-          .getAttribute("data-paypart")
-          .split("|");
-        const max = Number(amountStr);
-        const key = lockKey(fromId, toId);
-
-        await withLock(key, async () => {
-          openPaymentModal({
-            title: "Trả một phần",
-            fromName: nameOf(fromId),
-            toName: nameOf(toId),
-            amount: max, // gợi ý = max hiện tại
-            maxAmount: max, // ✅ chặn vượt
-            lockAmount: false,
-            defaultNote: "Trả một phần",
-            parseVndInput,
-            onSubmit: async ({ amount: amt, note }) => {
-              await createPayment(fromId, toId, amt, note || "Trả một phần");
-              showToast({
-                title: "Thành công",
-                message: "Đã ghi nhận thanh toán.",
-                variant: "success",
-              });
-            },
-          });
-        });
-      };
-    });
-  }
-
-  async function createPayment(fromId, toId, amount, note) {
-    const groupId = state.groupId;
-    const date = periodToYmd(selectedPeriod);
-
-    try {
-      await addPayment(groupId, {
-        date,
-        fromId,
-        toId,
-        amount,
-        note,
-        createdBy: state.user.uid,
-      });
-    } catch (e) {
-      console.error(e);
-
-      const msg = mapFirestoreError(e, "Không thể ghi nhận thanh toán.");
-
-      showToast({ title: "Thất bại", message: msg, variant: "danger" });
-      throw e;
-    }
-  }
-
-  function renderAllFromLive() {
-    renderExpensesList(live.expenses);
-    renderPaymentsList(live.payments);
-    renderEngineFromData(live.expenses, live.payments);
-  }
-
-  // ====== Init
-  renderDebtsInputs();
-
-  // month watch
-  let selectedPeriod = currentPeriod();
-  const periodPicker = $("periodPicker");
-  if (periodPicker) periodPicker.value = selectedPeriod;
-
-  function startWatchForPeriod() {
-    if (_unsubExpenses) _unsubExpenses();
-    if (_unsubPayments) _unsubPayments();
-
-    const groupId = state.groupId;
-    const { start, end } = getMonthRange(selectedPeriod);
-
-    _unsubExpenses = watchExpensesByRange(groupId, start, end, (items) => {
-      live.expenses = items;
-      renderAllFromLive();
-    });
-
-    _unsubPayments = watchPaymentsByRange(groupId, start, end, (items) => {
-      live.payments = items;
-      renderAllFromLive();
-    });
-  }
-
-  periodPicker?.addEventListener("change", (e) => {
-    selectedPeriod = e.target.value || currentPeriod();
-    startWatchForPeriod();
+  });
+  byId("btnResetExpense").addEventListener("click", resetForm);
+  byId("btnSaveExpense").addEventListener("click", async () => {
+    await saveExpense();
   });
 
-  startWatchForPeriod();
+  renderDebtsInputs();
+  byId("exDate").value = periodToYmd(selectedPeriod);
+  renderExpensesList([]);
+  startWatch();
+
+  const onHashChange = () => {
+    if (!location.hash.startsWith("#/expenses")) {
+      unsubscribeExpenses?.();
+      window.removeEventListener("hashchange", onHashChange);
+    }
+  };
+
+  window.addEventListener("hashchange", onHashChange);
 }

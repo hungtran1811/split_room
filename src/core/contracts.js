@@ -1,5 +1,5 @@
 /**
- * @typedef {"admin" | "member"} MemberRole
+ * @typedef {"owner" | "admin" | "member"} MemberRole
  */
 
 /**
@@ -63,7 +63,130 @@
 /**
  * @typedef {Object} PermissionState
  * @property {boolean} isAdmin
+ * @property {boolean} isOwner
+ * @property {boolean} canOperateMonth
  * @property {MemberProfile | null} memberProfile
+ */
+
+/**
+ * @typedef {Object} MonthlyReportStats
+ * @property {number} expenseCount
+ * @property {number} paymentCount
+ * @property {number} expenseTotal
+ * @property {number} paymentTotal
+ * @property {number} rentTotal
+ * @property {number} settlementCount
+ */
+
+/**
+ * @typedef {Object} MonthlyReportMemberSummary
+ * @property {string} memberId
+ * @property {string} name
+ * @property {number} netBalance
+ * @property {number} rentShare
+ * @property {number} rentPaid
+ * @property {number} rentRemaining
+ */
+
+/**
+ * @typedef {Object} MonthlyReportSettlement
+ * @property {string} fromId
+ * @property {string} toId
+ * @property {number} amount
+ */
+
+/**
+ * @typedef {Object} MonthlyReportRentSummary
+ * @property {string} payerId
+ * @property {number} total
+ * @property {number} collected
+ * @property {number} remaining
+ * @property {Record<string, number>} shares
+ * @property {Record<string, number>} paid
+ * @property {string=} note
+ * @property {unknown=} updatedAt
+ */
+
+/**
+ * @typedef {Object} MonthlyReport
+ * @property {string} period
+ * @property {MonthlyReportStats} stats
+ * @property {Record<string, number>} balances
+ * @property {MonthlyReportSettlement[]} settlementPlan
+ * @property {MonthlyReportRentSummary | null} rentSummary
+ * @property {MonthlyReportMemberSummary[]} memberSummaries
+ * @property {{ source: "live" | "snapshot", snapshotAt?: unknown, snapshotBy?: string, reportVersion?: number, createdAt?: unknown, updatedAt?: unknown }} meta
+ */
+
+/**
+ * @typedef {MonthlyReport} MonthlyReportSnapshot
+ */
+
+/**
+ * @typedef {Object} PeriodSummary
+ * @property {string} period
+ * @property {unknown=} snapshotAt
+ * @property {string=} snapshotBy
+ * @property {unknown=} updatedAt
+ * @property {MonthlyReportStats} stats
+ */
+
+/**
+ * @typedef {Object} AdminMemberDiagnostic
+ * @property {string} code
+ * @property {string} label
+ */
+
+/**
+ * @typedef {Object} AdminCurrentPeriodStatus
+ * @property {boolean} rentExists
+ * @property {boolean} reportSnapshotExists
+ */
+
+/**
+ * @typedef {Object} AdminOverview
+ * @property {string} groupId
+ * @property {MemberProfile | null} owner
+ * @property {MemberProfile | null} backupAdmin
+ * @property {number} memberCount
+ * @property {{
+ *   missingMemberId: MemberProfile[],
+ *   legacyRoles: MemberProfile[],
+ *   emailMapMismatch: MemberProfile[],
+ *   unknownRosterMembers: MemberProfile[]
+ * }} diagnostics
+ * @property {AdminCurrentPeriodStatus} currentPeriodStatus
+ */
+
+/**
+ * @typedef {Object} SettlementLine
+ * @property {string} fromId
+ * @property {string} toId
+ * @property {number} amount
+ */
+
+/**
+ * @typedef {Object} MonthlySettlementView
+ * @property {Record<string, Record<string, number>>} grossMatrix
+ * @property {Record<string, number>} balances
+ * @property {SettlementLine[]} settlementPlan
+ * @property {Record<string, Record<string, number>>} settleMatrix
+ */
+
+/**
+ * @typedef {Object} PaymentsPageState
+ * @property {string} period
+ * @property {boolean} loading
+ * @property {boolean} saving
+ * @property {string | null} editingPaymentId
+ */
+
+/**
+ * @typedef {Object} MatrixPageState
+ * @property {string} period
+ * @property {boolean} loading
+ * @property {number} expenseCount
+ * @property {number} paymentCount
  */
 
 export {};

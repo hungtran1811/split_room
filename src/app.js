@@ -15,7 +15,11 @@ import { normalizeMemberRole } from "./core/roles";
 import { renderLoginPage } from "./ui/pages/login.page";
 import { renderDashboardPage } from "./ui/pages/dashboard.page";
 import { renderExpensesPage } from "./ui/pages/expenses.page";
+import { renderPaymentsPage } from "./ui/pages/payments.page";
+import { renderMatrixPage } from "./ui/pages/matrix.page";
 import { renderRentPage } from "./ui/pages/rent.page";
+import { renderReportsPage } from "./ui/pages/reports.page";
+import { renderAdminPage } from "./ui/pages/admin.page";
 import { ensureDefaultGroup } from "./services/group.service";
 import {
   getCurrentMemberProfile,
@@ -24,6 +28,7 @@ import {
   watchMyMemberProfile,
 } from "./services/member.service";
 import { EMAIL_TO_MEMBER_ID } from "./config/members.map";
+import { LEGACY_OWNER_UID } from "./config/constants";
 
 let authReady = false;
 let bootLoading = true;
@@ -43,13 +48,15 @@ function renderBootScreen() {
 
   if (bootError) {
     root.innerHTML = `
-      <div class="container py-5">
-        <div class="alert alert-danger">
-          <div class="fw-semibold mb-1">Không thể tải dữ liệu</div>
-          <div class="small mb-3">${bootError}</div>
-          <div class="d-flex gap-2">
-            <button class="btn btn-primary" id="btnRetry">Thử lại</button>
-            <button class="btn btn-outline-secondary" id="btnLogout">Đăng xuất</button>
+      <div class="app-shell auth-shell">
+        <div class="app-shell__container app-shell__container--sm">
+          <div class="alert alert-danger">
+            <div class="fw-semibold mb-1">Không thể tải dữ liệu</div>
+            <div class="small mb-3">${bootError}</div>
+            <div class="d-flex gap-2">
+              <button class="btn btn-primary" id="btnRetry">Thử lại</button>
+              <button class="btn btn-outline-secondary" id="btnLogout">Đăng xuất</button>
+            </div>
           </div>
         </div>
       </div>
@@ -75,12 +82,16 @@ function renderBootScreen() {
 
   if (!redirectResolved || !authReady || bootLoading) {
     root.innerHTML = `
-      <div class="container py-5">
-        <div class="d-flex align-items-center gap-3">
-          <div class="spinner-border" role="status" aria-label="Loading"></div>
-          <div>
-            <div class="fw-semibold">Đang tải...</div>
-            <div class="text-secondary small">Vui lòng chờ trong giây lát</div>
+      <div class="app-shell auth-shell">
+        <div class="app-shell__container app-shell__container--sm">
+          <div class="auth-shell__card p-4">
+            <div class="d-flex align-items-center gap-3">
+              <div class="spinner-border" role="status" aria-label="Loading"></div>
+              <div>
+                <div class="fw-semibold">Đang tải...</div>
+                <div class="text-secondary small">Vui lòng chờ trong giây lát</div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -124,7 +135,15 @@ async function ensureMemberProfile() {
     state.groupId,
     state.user.uid,
   );
-  const role = normalizeMemberRole(currentProfile || { memberId });
+  const role = normalizeMemberRole({
+    ...(currentProfile || {}),
+    uid: state.user.uid,
+    memberId,
+    role:
+      state.user.uid === LEGACY_OWNER_UID
+        ? "owner"
+        : currentProfile?.role,
+  });
 
   await upsertMemberProfile(state.groupId, state.user, {
     memberId,
@@ -195,8 +214,28 @@ async function render() {
     return;
   }
 
+  if (route.startsWith("#/payments")) {
+    await renderPaymentsPage();
+    return;
+  }
+
+  if (route.startsWith("#/matrix")) {
+    await renderMatrixPage();
+    return;
+  }
+
   if (route.startsWith("#/rent")) {
     await renderRentPage();
+    return;
+  }
+
+  if (route.startsWith("#/reports")) {
+    await renderReportsPage();
+    return;
+  }
+
+  if (route.startsWith("#/admin")) {
+    await renderAdminPage();
     return;
   }
 
