@@ -111,7 +111,6 @@ function rentSummaryForMember(rentDoc, myId) {
       expectedFromOthers,
       collectedFromOthers,
       remainToCollect,
-      status: rentDoc.status || "draft",
     };
   }
 
@@ -124,7 +123,6 @@ function rentSummaryForMember(rentDoc, myId) {
     mustPay,
     alreadyPaid,
     remain,
-    status: rentDoc.status || "draft",
   };
 }
 
@@ -135,17 +133,11 @@ function monthStatusCards({ expenses, payments, rent }) {
         text: "Chưa có tiền nhà",
         detail: "Tháng này chưa tạo bản ghi tiền nhà.",
       }
-    : rent.status === "finalized"
-      ? {
-          badge: "bg-success",
-          text: "Tiền nhà đã chốt",
-          detail: `Tổng ${formatVND(rent.total || 0)}`,
-        }
-      : {
-          badge: "bg-warning text-dark",
-          text: "Tiền nhà đang nháp",
-          detail: `Tổng ${formatVND(rent.total || 0)}`,
-        };
+    : {
+        badge: "bg-success",
+        text: "Đã có tiền nhà",
+        detail: `Tổng ${formatVND(rent.total || 0)}`,
+      };
 
   return [
     {
@@ -194,11 +186,6 @@ function renderRentCard(rentSummary) {
     `;
   }
 
-  const statusBadge =
-    rentSummary.status === "finalized"
-      ? `<span class="badge bg-success">ĐÃ CHỐT</span>`
-      : `<span class="badge bg-warning text-dark">NHÁP</span>`;
-
   if (rentSummary.mode === "payer") {
     const percent = clampPercent(
       rentSummary.expectedFromOthers <= 0
@@ -211,10 +198,7 @@ function renderRentCard(rentSummary) {
       <div class="card mb-3">
         <div class="card-header d-flex justify-content-between align-items-center">
           <b>Tiền nhà tháng này</b>
-          <div class="d-flex align-items-center gap-2">
-            ${statusBadge}
-            <a class="btn btn-outline-secondary btn-sm" href="#/rent">Mở</a>
-          </div>
+          <a class="btn btn-outline-secondary btn-sm" href="#/rent">Mở</a>
         </div>
         <div class="card-body">
           <div class="text-secondary small mb-2">Bạn là người trả nhà.</div>
@@ -270,10 +254,7 @@ function renderRentCard(rentSummary) {
     <div class="card mb-3">
       <div class="card-header d-flex justify-content-between align-items-center">
         <b>Tiền nhà tháng này</b>
-        <div class="d-flex align-items-center gap-2">
-          ${statusBadge}
-          <a class="btn btn-outline-secondary btn-sm" href="#/rent">Mở</a>
-        </div>
+        <a class="btn btn-outline-secondary btn-sm" href="#/rent">Mở</a>
       </div>
       <div class="card-body">
         <div class="d-flex justify-content-between small text-secondary">
@@ -686,3 +667,4 @@ export function renderDashboardPage() {
   startWatch();
   renderLoading();
 }
+

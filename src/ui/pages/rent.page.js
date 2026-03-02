@@ -52,29 +52,6 @@ function emptyRentDoc(period, payerId) {
     shares: buildEqualShares(0, ROSTER_IDS),
     paid: emptyPaid(),
     note: "",
-    status: "draft",
-    finalizedAt: null,
-    finalizedBy: null,
-  };
-}
-
-function statusMeta(status) {
-  if (status === "finalized") {
-    return {
-      badgeClass: "bg-success",
-      badgeText: "ĐÃ CHỐT",
-      hint: "Tháng này đã được chốt.",
-      toggleText: "Mở chốt",
-      toggleVariant: "btn-outline-warning",
-    };
-  }
-
-  return {
-    badgeClass: "bg-secondary",
-    badgeText: "NHÁP",
-    hint: "Tháng này đang ở trạng thái nhập.",
-    toggleText: "Chốt tháng",
-    toggleVariant: "btn-outline-success",
   };
 }
 
@@ -106,13 +83,6 @@ export async function renderRentPage() {
         <div class="col-6 col-md-4">
           <label class="form-label small mb-1">Chọn tháng</label>
           <input id="rentPeriod" type="month" class="form-control" />
-        </div>
-        <div class="col-6 col-md-4">
-          <div class="small text-secondary mb-1">Trạng thái</div>
-          <div class="d-flex align-items-center gap-2">
-            <span id="rentStatusBadge" class="badge bg-secondary">NHÁP</span>
-            <span id="rentStatusHint" class="small text-secondary"></span>
-          </div>
         </div>
       </div>
 
@@ -241,7 +211,6 @@ export async function renderRentPage() {
               </div>
               <div class="d-flex flex-wrap gap-2 mt-3">
                 <button id="btnSaveRent" type="button" class="btn btn-primary">Lưu</button>
-                <button id="btnToggleFinalize" type="button" class="btn btn-outline-success">Chốt tháng</button>
                 <button id="btnClearPaid" type="button" class="btn btn-outline-secondary">Clear đã chuyển</button>
                 <div class="small text-danger align-self-center" id="rentMsg"></div>
               </div>
@@ -321,14 +290,7 @@ export async function renderRentPage() {
     byId("rentTotal").textContent = formatVND(computed.total);
   }
 
-  function updateStatusUi(docData) {
-    const meta = statusMeta(docData?.status || "draft");
-    byId("rentStatusBadge").className = `badge ${meta.badgeClass}`;
-    byId("rentStatusBadge").textContent = meta.badgeText;
-    byId("rentStatusHint").textContent = meta.hint;
-    byId("btnToggleFinalize").className = `btn ${meta.toggleVariant}`;
-    byId("btnToggleFinalize").textContent = meta.toggleText;
-
+  function updateRentMetaUi(docData) {
     const updatedAt = docData?.updatedAt?.toDate
       ? docData.updatedAt.toDate().toLocaleString("vi-VN")
       : docData?.updatedAt || "Chưa có";
@@ -515,7 +477,7 @@ export async function renderRentPage() {
       byId("splitEqual").checked ? buildEqualShares(total, ROSTER_IDS) : shares,
       paid,
     );
-    updateStatusUi(normalized);
+    updateRentMetaUi(normalized);
     syncSummary({
       total,
       equal: byId("splitEqual").checked,
@@ -536,9 +498,6 @@ export async function renderRentPage() {
     const next = {
       ...previous,
       period: targetPeriod,
-      status: "draft",
-      finalizedAt: null,
-      finalizedBy: null,
       note: "",
       paid: emptyPaid(),
     };
@@ -556,7 +515,7 @@ export async function renderRentPage() {
     return true;
   }
 
-  async function saveRent(statusOverride = null) {
+  async function saveRent() {
     if (!canEdit) return;
 
     byId("rentMsg").textContent = "";
@@ -567,7 +526,6 @@ export async function renderRentPage() {
       return;
     }
 
-    const targetStatus = statusOverride || liveDoc?.status || "draft";
     const payload = {
       payerId,
       items: snapshot.items,
@@ -587,30 +545,16 @@ export async function renderRentPage() {
       paid: snapshot.paid,
       note: byId("rentNote").value.trim(),
       createdBy: liveDoc?.createdBy || state.user.uid,
-      status: targetStatus,
-      finalizedAt:
-        targetStatus === "finalized"
-          ? liveDoc?.finalizedAt || new Date().toISOString()
-          : null,
-      finalizedBy:
-        targetStatus === "finalized"
-          ? liveDoc?.finalizedBy || state.user.uid
-          : null,
     };
 
     const saveButton = byId("btnSaveRent");
-    const toggleButton = byId("btnToggleFinalize");
     saveButton.disabled = true;
-    toggleButton.disabled = true;
 
     try {
       await upsertRentByPeriod(groupId, period, payload);
       showToast({
         title: "Thành công",
-        message:
-          targetStatus === "finalized"
-            ? "Đã lưu và chốt tháng."
-            : "Đã lưu tiền nhà.",
+        message: "Đã lưu tiền nhà.",
         variant: "success",
       });
     } catch (error) {
@@ -623,7 +567,6 @@ export async function renderRentPage() {
       });
     } finally {
       saveButton.disabled = !canEdit;
-      toggleButton.disabled = !canEdit;
     }
   }
 
@@ -687,12 +630,6 @@ export async function renderRentPage() {
 
   byId("btnSaveRent").addEventListener("click", async () => {
     await saveRent();
-  });
-
-  byId("btnToggleFinalize").addEventListener("click", async () => {
-    const nextStatus =
-      liveDoc?.status === "finalized" ? "draft" : "finalized";
-    await saveRent(nextStatus);
   });
 
   byId("btnClearPaid").addEventListener("click", () => {

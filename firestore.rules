@@ -27,6 +27,14 @@ service cloud.firestore {
       return /databases/$(database)/documents/groups/$(groupId)/members/$(uid);
     }
 
+    function legacyAdminUid() {
+      return "8tgX0c2IBbTx0k0oIZgn7w2H12b2";
+    }
+
+    function memberExists(groupId, uid) {
+      return exists(memberDocPath(groupId, uid));
+    }
+
     function memberDoc(groupId, uid) {
       return get(memberDocPath(groupId, uid));
     }
@@ -34,12 +42,19 @@ service cloud.firestore {
     function isGroupMember(groupId) {
       return signedIn()
         && isAllowedEmail()
-        && exists(memberDocPath(groupId, request.auth.uid));
+        && memberExists(groupId, request.auth.uid);
     }
 
     function isGroupAdmin(groupId) {
-      return isGroupMember(groupId)
-        && memberDoc(groupId, request.auth.uid).data.role == "admin";
+      return signedIn()
+        && isAllowedEmail()
+        && (
+          request.auth.uid == legacyAdminUid()
+          || (
+            memberExists(groupId, request.auth.uid)
+            && memberDoc(groupId, request.auth.uid).data.role == "admin"
+          )
+        );
     }
 
     function periodRegex() {
@@ -90,8 +105,15 @@ service cloud.firestore {
         && request.resource.data.splitMode in ["equal", "custom"]
         && request.resource.data.shares is map
         && request.resource.data.paid is map
+        && request.resource.data.createdBy is string
         && (!request.resource.data.keys().hasAny(["status"])
-          || request.resource.data.status in ["draft", "finalized"]);
+          || request.resource.data.status in ["draft", "finalized"])
+        && (!request.resource.data.keys().hasAny(["finalizedAt"])
+          || request.resource.data.finalizedAt == null
+          || request.resource.data.finalizedAt is string)
+        && (!request.resource.data.keys().hasAny(["finalizedBy"])
+          || request.resource.data.finalizedBy == null
+          || request.resource.data.finalizedBy is string);
     }
 
     function validPeriodWrite(groupId, periodId) {
@@ -116,10 +138,19 @@ service cloud.firestore {
           && request.resource.data.email is string
           && validRole(request.resource.data.role);
         allow update: if isGroupAdmin(groupId)
-          || (request.auth.uid == uid
+          || (signedIn()
+            && isAllowedEmail()
+            && request.auth.uid == uid
             && request.resource.data.uid == uid
             && request.resource.data.memberId == resource.data.memberId
-            && request.resource.data.role == resource.data.role);
+            && request.resource.data.email == resource.data.email
+            && (
+              request.resource.data.role == resource.data.role
+              || (
+                !resource.data.keys().hasAny(["role"])
+                && validRole(request.resource.data.role)
+              )
+            ));
         allow delete: if isGroupAdmin(groupId);
       }
 
@@ -138,7 +169,7 @@ service cloud.firestore {
         allow read: if isGroupMember(groupId);
         allow create: if isGroupAdmin(groupId)
           && validRentShape(rentId)
-          && request.resource.data.createdBy == request.auth.uid;
+          && request.resource.data.createdBy is string;
         allow update: if isGroupAdmin(groupId)
           && validRentShape(rentId)
           && request.resource.data.createdBy == resource.data.createdBy;

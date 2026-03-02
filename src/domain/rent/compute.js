@@ -78,16 +78,6 @@ export function computeRentCosts(items, meta, legacyFallback = null) {
 }
 
 export function sanitizeRentPayload(period, payload, existingRent = null) {
-  const hasFinalizedAt = Object.prototype.hasOwnProperty.call(
-    payload || {},
-    "finalizedAt",
-  );
-  const hasFinalizedBy = Object.prototype.hasOwnProperty.call(
-    payload || {},
-    "finalizedBy",
-  );
-  const hasStatus = Object.prototype.hasOwnProperty.call(payload || {}, "status");
-
   const items = {
     rent: clampNonNegative(payload?.items?.rent || 0),
     wifi: clampNonNegative(payload?.items?.wifi || 0),
@@ -133,19 +123,6 @@ export function sanitizeRentPayload(period, payload, existingRent = null) {
     shares,
     paid,
     note: String(payload?.note || "").trim(),
-    status: hasStatus
-      ? payload?.status === "finalized"
-        ? "finalized"
-        : "draft"
-      : existingRent?.status === "finalized"
-        ? "finalized"
-        : "draft",
-    finalizedAt: hasFinalizedAt
-      ? payload?.finalizedAt ?? null
-      : existingRent?.finalizedAt || null,
-    finalizedBy: hasFinalizedBy
-      ? payload?.finalizedBy ?? null
-      : existingRent?.finalizedBy || null,
     createdBy: String(existingRent?.createdBy || payload?.createdBy || ""),
   };
 }

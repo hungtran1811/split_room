@@ -48,7 +48,6 @@
  * @property {Record<string, number>} shares
  * @property {Record<string, number>} paid
  * @property {string=} note
- * @property {"draft" | "finalized"=} status
  * @property {string=} createdBy
  */
 
