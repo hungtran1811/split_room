@@ -41,16 +41,6 @@
           "order": "DESCENDING"
         }
       ]
-    },
-    {
-      "collectionGroup": "periods",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "period",
-          "order": "DESCENDING"
-        }
-      ]
     }
   ],
   "fieldOverrides": []
