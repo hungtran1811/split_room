@@ -1,5 +1,10 @@
 import { logout } from "../../services/auth.service";
-import { state } from "../../core/state";
+import {
+  getSelectedPeriod,
+  setSelectedPeriod,
+  state,
+  subscribeSelectedPeriod,
+} from "../../core/state";
 import { ROSTER, ROSTER_IDS, nameOf } from "../../config/roster";
 import { getCurrentUserLabel, getUserLabel } from "../../core/display-name";
 import { formatVND } from "../../config/i18n";
@@ -8,6 +13,7 @@ import { mapFirestoreError } from "../../core/errors";
 import { showToast } from "../components/toast";
 import { openConfirmModal } from "../components/confirmModal";
 import { openExpenseEditModal } from "../components/expenseEditModal";
+import { renderAppShell } from "../layout/app-shell";
 import { mountPrimaryNav } from "../layout/navbar";
 import {
   addExpense,
@@ -15,16 +21,12 @@ import {
   updateExpense,
 } from "../../services/expense.service";
 import { watchMonthExpenses } from "../../services/month-ops.service";
+import { renderFilterPill } from "../components/filterBar";
+import { renderMoneyStatCard } from "../components/moneyStatCard";
+import { renderSectionHeader } from "../components/sectionHeader";
 
 function byId(id) {
   return document.getElementById(id);
-}
-
-function currentPeriod() {
-  const date = new Date();
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  return `${year}-${month}`;
 }
 
 function periodToYmd(period) {
@@ -51,142 +53,46 @@ function creatorLabel(uid) {
   return uid;
 }
 
+function groupExpensesByDate(expenses) {
+  const groups = new Map();
+  for (const expense of expenses) {
+    const key = expense.date || "Không rõ ngày";
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(expense);
+  }
+
+  return [...groups.entries()].map(([date, items]) => ({
+    date,
+    items,
+  }));
+}
+
+function renderExpenseSummary(expenses) {
+  const total = expenses.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+
+  return `
+    <section class="money-grid">
+      ${renderMoneyStatCard({
+        label: "Tổng chi trong tháng",
+        value: formatVND(total),
+        hint: `${expenses.length} khoản chi`,
+        tone: total > 0 ? "warning" : "neutral",
+      })}
+    </section>
+  `;
+}
+
 export async function renderExpensesPage() {
   if (!state.user || !state.groupId) return;
 
   const app = document.querySelector("#app");
   const groupId = state.groupId;
   const canManageEntries = state.canOperateMonth;
-  let selectedPeriod = currentPeriod();
-  let expensesCollapsed = false;
+  const composerOpenByDefault = window.matchMedia("(min-width: 992px)").matches;
+  const currentUserLabel = getCurrentUserLabel(state);
+  let selectedPeriod = getSelectedPeriod();
   let unsubscribeExpenses = null;
   let liveExpenses = [];
-
-  app.innerHTML = `
-    <div class="app-shell" data-page="expenses">
-      <div class="app-shell__container">
-        <div class="app-shell__header">
-          <div class="app-shell__title-block">
-            <h1 class="app-shell__title">Chi tiêu</h1>
-            <div class="app-shell__meta">Nhóm: <b>${groupId}</b></div>
-          </div>
-          <div id="primaryNavHost" class="app-shell__nav-host"></div>
-        </div>
-
-      <div class="row g-2 align-items-end">
-        <div class="col-6 col-md-4">
-          <label class="form-label small mb-1">Chọn tháng</label>
-          <input id="periodPicker" type="month" class="form-control" value="${selectedPeriod}" />
-        </div>
-        <div class="col-12">
-          <div class="small text-secondary mt-2">
-            Trang này chỉ còn quản lý chi tiêu theo tháng. Thanh toán theo cấn trừ nằm trong trang Thanh toán.
-          </div>
-        </div>
-      </div>
-
-      <hr class="my-3"/>
-
-      <div class="card mb-3">
-        <div class="card-header">Thêm khoản chi</div>
-        <div class="card-body">
-          <div class="row g-3">
-            <div class="col-md-4">
-              <label class="form-label">Ngày</label>
-              <input id="exDate" type="date" class="form-control" value="${todayYmd()}"/>
-            </div>
-
-            <div class="col-md-4">
-              <label class="form-label">Số tiền (VNĐ)</label>
-              <input id="exAmount" class="form-control" placeholder="VD: 10000 hoặc 10.000,5"/>
-              <div class="form-text">Giữ số lẻ nếu có. Nhập 10.000 hoặc 10000 đều được.</div>
-            </div>
-
-            <div class="col-md-4">
-              <label class="form-label">Người trả</label>
-              <select id="exPayer" class="form-select">
-                ${ROSTER.map((member) => `<option value="${member.id}">${member.name}</option>`).join("")}
-              </select>
-            </div>
-
-            <div class="col-12">
-              <label class="form-label mb-2">Người tham gia (tick)</label>
-              <div class="row g-2">
-                ${ROSTER.map(
-                  (member) => `
-                    <div class="col-6 col-md-3">
-                      <div class="form-check">
-                        <input class="form-check-input exPart" type="checkbox" id="p_${member.id}" data-id="${member.id}" checked>
-                        <label class="form-check-label" for="p_${member.id}">${member.name}</label>
-                      </div>
-                    </div>
-                  `,
-                ).join("")}
-              </div>
-              <div class="form-text">
-                Nếu người trả cũng tham gia, cứ tick bình thường. Engine sẽ tự tính phần của người trả.
-              </div>
-            </div>
-
-            <div class="col-12">
-              <div class="d-flex align-items-center gap-3">
-                <div class="form-check">
-                  <input class="form-check-input" type="checkbox" id="exEqual" checked>
-                  <label class="form-check-label" for="exEqual">Chia đều</label>
-                </div>
-                <div class="small text-secondary">
-                  Bỏ tick để tùy chỉnh số tiền nợ cho từng người.
-                </div>
-              </div>
-            </div>
-
-            <div class="col-12">
-              <div class="card">
-                <div class="card-header">Phân bổ nợ (ai nợ người trả bao nhiêu)</div>
-                <div class="card-body">
-                  <div id="debtsBox" class="row g-3"></div>
-                  <div class="mt-2 small">
-                    <div>Tổng nợ của người khác: <b id="sumDebts">0 đ</b></div>
-                    <div>Phần của người trả (tự tính): <b id="payerShare">0 đ</b></div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div class="col-12">
-              <label class="form-label">Ghi chú (tùy chọn)</label>
-              <input id="exNote" class="form-control" placeholder="VD: Ăn uống, Đi chợ, ..."/>
-            </div>
-
-            <div class="col-12 d-flex gap-2">
-              <button id="btnSaveExpense" class="btn btn-primary">Lưu chi tiêu</button>
-              <button id="btnResetExpense" class="btn btn-outline-secondary">Nhập lại</button>
-              <div id="msg" class="small text-danger align-self-center"></div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="card mb-3">
-        <div class="card-header d-flex justify-content-between align-items-center">
-          <div>Danh sách chi tiêu</div>
-          <button id="btnToggleExpenses" class="btn btn-outline-secondary btn-sm" type="button">Ẩn</button>
-        </div>
-        <div class="card-body" id="expensesListWrap" style="max-height: 400px; overflow-y: auto; overflow-x: hidden;">
-          <div id="expensesList" class="small text-secondary">Đang tải...</div>
-        </div>
-      </div>
-    </div>
-  `;
-
-  mountPrimaryNav({
-    active: "expenses",
-    isOwner: state.isOwner,
-    includeLogout: true,
-    onLogout: async () => {
-      await logout();
-    },
-  });
 
   function setMessage(text = "") {
     byId("msg").textContent = text;
@@ -320,6 +226,9 @@ export async function renderExpensesPage() {
         variant: "success",
       });
       resetForm();
+      if (!composerOpenByDefault) {
+        byId("expenseComposer").open = false;
+      }
     } catch (error) {
       const message = mapFirestoreError(error, "Lưu thất bại.");
       setMessage(message);
@@ -339,49 +248,61 @@ export async function renderExpensesPage() {
     if (!wrap) return;
 
     if (!expenses.length) {
-      wrap.innerHTML = `<div class="text-secondary">Chưa có chi tiêu.</div>`;
+      wrap.innerHTML = `
+        <div class="empty-state">
+          <div class="empty-state__title">Chưa có khoản chi nào</div>
+          <div class="empty-state__text">
+            Hãy thêm khoản chi đầu tiên cho tháng ${selectedPeriod}.
+          </div>
+        </div>
+      `;
       return;
     }
 
-    wrap.innerHTML = `
-      <div class="list-group">
-        ${expenses
-          .map(
-            (expense) => `
-              <div class="list-group-item">
-                <div class="d-flex justify-content-between align-items-start gap-3">
-                  <div>
-                    <div class="fw-semibold">${expense.date} • ${formatVND(expense.amount)}</div>
-                    <div class="text-secondary">Người trả: <b>${nameOf(expense.payerId)}</b>${expense.note ? ` • ${expense.note}` : ""}</div>
-                    <div class="text-secondary small">Người tạo: <b>${creatorLabel(expense.createdBy)}</b></div>
-                    <div class="small text-secondary mt-1">
-                      Nợ:
-                      ${
-                        Object.entries(expense.debts || {}).length
-                          ? Object.entries(expense.debts || {})
-                              .map(([memberId, value]) => `${nameOf(memberId)} ${formatVND(value)}`)
-                              .join(" • ")
-                          : "Không có"
-                      }
-                    </div>
-                  </div>
-                  ${
-                    canManageEntries
-                      ? `
-                        <div class="d-flex gap-2">
-                          <button class="btn btn-outline-secondary btn-sm" data-edit-expense="${expense.id}">Sửa</button>
-                          <button class="btn btn-outline-danger btn-sm" data-delete-expense="${expense.id}">Xóa</button>
+    wrap.innerHTML = groupExpensesByDate(expenses)
+      .map(
+        ({ date, items }) => `
+          <section class="expense-day-group">
+            ${renderSectionHeader({
+              title: date,
+              subtitle: `${items.length} khoản chi trong ngày`,
+              className: "expense-day-group__header",
+            })}
+            <div class="expense-day-group__list">
+              ${items
+                .map(
+                  (expense) => `
+                    <article class="action-list__item">
+                      <div class="action-list__head">
+                        <div>
+                          <div class="money-card__value" style="font-size: var(--money-md);">${formatVND(expense.amount)}</div>
+                          <div class="action-list__meta">Người trả: ${nameOf(expense.payerId)}</div>
+                          <div class="action-list__meta">${expense.note || "Không có ghi chú"}</div>
+                          <div class="action-list__meta">
+                            Người tham gia: ${(expense.participants || []).map((memberId) => nameOf(memberId)).join(", ") || "Không có"}
+                          </div>
+                          <div class="action-list__meta">Người tạo: ${creatorLabel(expense.createdBy)}</div>
                         </div>
-                      `
-                      : ""
-                  }
-                </div>
-              </div>
-            `,
-          )
-          .join("")}
-      </div>
-    `;
+                        ${
+                          canManageEntries
+                            ? `
+                              <div class="d-flex flex-wrap gap-2">
+                                <button class="btn ui-action-pill ui-action-pill--secondary section-cta" data-edit-expense="${expense.id}">Sửa</button>
+                                <button class="btn ui-action-pill ui-action-pill--danger section-cta" data-delete-expense="${expense.id}">Xóa</button>
+                              </div>
+                            `
+                            : ""
+                        }
+                      </div>
+                    </article>
+                  `,
+                )
+                .join("")}
+            </div>
+          </section>
+        `,
+      )
+      .join("");
 
     if (!canManageEntries) return;
 
@@ -446,57 +367,224 @@ export async function renderExpensesPage() {
     });
   }
 
+  function renderPage() {
+    app.innerHTML = renderAppShell({
+      pageId: "expenses",
+      title: "Chi tiêu",
+      subtitle: "Theo dõi khoản chi theo tháng",
+      meta: [`Đăng nhập: ${currentUserLabel}`, `Nhóm: ${groupId}`],
+      showPeriodFilter: true,
+      period: selectedPeriod,
+      periodActions: [
+        renderFilterPill({
+          label: `${liveExpenses.length} khoản`,
+          tone: liveExpenses.length ? "neutral" : "warning",
+        }),
+        '<button id="btnOpenComposer" class="btn ui-action-pill ui-action-pill--primary" type="button">Thêm khoản chi</button>',
+      ].join(""),
+      content: `
+        <div id="expensesSummary">
+          ${renderExpenseSummary(liveExpenses)}
+        </div>
+
+        <details class="card section-card" id="expenseComposer" ${composerOpenByDefault ? "open" : ""}>
+          <summary class="card-header">Thêm khoản chi</summary>
+          <div class="card-body section-card__body">
+            <div class="row g-3">
+              <div class="col-md-4">
+                <label class="form-label">Ngày</label>
+                <input id="exDate" type="date" class="form-control" value="${todayYmd()}"/>
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label">Số tiền (VNĐ)</label>
+                <input id="exAmount" class="form-control" placeholder="VD: 10000 hoặc 10.000,5"/>
+                <div class="form-text">Có thể nhập số lẻ nếu cần.</div>
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label">Người trả</label>
+                <select id="exPayer" class="form-select">
+                  ${ROSTER.map((member) => `<option value="${member.id}">${member.name}</option>`).join("")}
+                </select>
+              </div>
+
+              <div class="col-12">
+                <label class="form-label mb-2">Người tham gia</label>
+                <div class="d-flex flex-wrap gap-2">
+                  ${ROSTER.map(
+                    (member) => `
+                      <label class="chip-toggle is-active" for="p_${member.id}">
+                        <input class="exPart" type="checkbox" id="p_${member.id}" data-id="${member.id}" checked>
+                        <span>${member.name}</span>
+                      </label>
+                    `,
+                  ).join("")}
+                </div>
+                <div class="form-text">
+                  Nếu người trả cũng tham gia, cứ tick bình thường. Engine sẽ tự tính phần của người trả.
+                </div>
+              </div>
+
+              <div class="col-12">
+                <div class="d-flex align-items-center gap-3 flex-wrap">
+                  <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="exEqual" checked>
+                    <label class="form-check-label" for="exEqual">Chia đều</label>
+                  </div>
+                  <div class="small text-secondary">
+                    Bỏ tick để tùy chỉnh số tiền nợ cho từng người.
+                  </div>
+                </div>
+              </div>
+
+              <div class="col-12">
+                <div class="card">
+                  <div class="card-body section-card__body">
+                    ${renderSectionHeader({
+                      title: "Phân bổ nợ",
+                      subtitle: "Phần chia chi tiết cho từng người trong khoản chi này.",
+                    })}
+                    <div id="debtsBox" class="row g-3"></div>
+                    <div class="money-grid money-grid--3">
+                      ${renderMoneyStatCard({
+                        label: "Tổng nợ người khác",
+                        value: '<span id="sumDebts">0 đ</span>',
+                        tone: "warning",
+                      })}
+                      ${renderMoneyStatCard({
+                        label: "Phần của người trả",
+                        value: '<span id="payerShare">0 đ</span>',
+                        tone: "neutral",
+                      })}
+                      ${renderMoneyStatCard({
+                        label: "Tháng đang nhập",
+                        value: selectedPeriod,
+                        tone: "positive",
+                      })}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="col-12">
+                <label class="form-label">Ghi chú</label>
+                <input id="exNote" class="form-control" placeholder="VD: Ăn uống, Đi chợ, ..." />
+              </div>
+
+              <div class="col-12 d-flex flex-wrap gap-2 align-items-center">
+                <button id="btnSaveExpense" class="btn btn-primary">Lưu chi tiêu</button>
+                <button id="btnResetExpense" class="btn btn-outline-secondary">Nhập lại</button>
+                <div id="msg" class="small text-danger"></div>
+              </div>
+            </div>
+          </div>
+        </details>
+
+        <section class="card section-card">
+          <div class="card-body section-card__body">
+            ${renderSectionHeader({
+              title: "Danh sách chi tiêu",
+              subtitle: "Lịch sử các khoản chi của tháng đang xem.",
+              action: `<span class="filter-pill filter-pill--neutral" id="expensesCount">${liveExpenses.length} khoản</span>`,
+            })}
+            <div id="expensesList"></div>
+          </div>
+        </section>
+      `,
+    });
+
+    mountPrimaryNav({
+      active: "expenses",
+      isOwner: state.isOwner,
+      includeLogout: true,
+      onLogout: async () => {
+        await logout();
+      },
+      userLabel: currentUserLabel,
+    });
+  }
+
+  function syncParticipantChips() {
+    document.querySelectorAll(".chip-toggle").forEach((label) => {
+      const checkbox = label.querySelector(".exPart");
+      label.classList.toggle("is-active", !!checkbox?.checked);
+    });
+  }
+
+  function bindEvents() {
+    byId("globalPeriodPicker").addEventListener("change", (event) => {
+      setSelectedPeriod(event.target.value);
+    });
+
+    byId("btnOpenComposer").addEventListener("click", () => {
+      const composer = byId("expenseComposer");
+      composer.open = true;
+      composer.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+
+    byId("exPayer").addEventListener("change", renderDebtsInputs);
+    byId("exAmount").addEventListener("input", () => {
+      if (byId("exEqual").checked) {
+        renderDebtsInputs();
+        return;
+      }
+
+      recalcTotals();
+    });
+    byId("exEqual").addEventListener("change", renderDebtsInputs);
+    document.querySelectorAll(".exPart").forEach((checkbox) => {
+      checkbox.addEventListener("change", () => {
+        syncParticipantChips();
+        renderDebtsInputs();
+      });
+    });
+    byId("debtsBox").addEventListener("input", (event) => {
+      if (event.target?.classList?.contains("debtInput")) {
+        recalcTotals();
+      }
+    });
+    byId("btnResetExpense").addEventListener("click", resetForm);
+    byId("btnSaveExpense").addEventListener("click", async () => {
+      await saveExpense();
+    });
+  }
+
   function startWatch() {
     unsubscribeExpenses?.();
     unsubscribeExpenses = watchMonthExpenses(groupId, selectedPeriod, (items) => {
       liveExpenses = items;
       renderExpensesList(items);
+      byId("expensesSummary").innerHTML = renderExpenseSummary(items);
+      byId("expensesCount").textContent = `${items.length} khoản`;
     });
   }
 
-  byId("periodPicker").addEventListener("change", (event) => {
-    selectedPeriod = event.target.value || currentPeriod();
-    byId("exDate").value = periodToYmd(selectedPeriod);
-    startWatch();
-  });
-
-  byId("btnToggleExpenses").addEventListener("click", () => {
-    expensesCollapsed = !expensesCollapsed;
-    byId("expensesListWrap").style.display = expensesCollapsed ? "none" : "block";
-    byId("btnToggleExpenses").textContent = expensesCollapsed ? "Hiện" : "Ẩn";
-  });
-
-  byId("exPayer").addEventListener("change", renderDebtsInputs);
-  byId("exAmount").addEventListener("input", () => {
-    if (byId("exEqual").checked) {
-      renderDebtsInputs();
-      return;
-    }
-
-    recalcTotals();
-  });
-  byId("exEqual").addEventListener("change", renderDebtsInputs);
-  document.querySelectorAll(".exPart").forEach((checkbox) => {
-    checkbox.addEventListener("change", renderDebtsInputs);
-  });
-  byId("debtsBox").addEventListener("input", (event) => {
-    if (event.target?.classList?.contains("debtInput")) {
-      recalcTotals();
-    }
-  });
-  byId("btnResetExpense").addEventListener("click", resetForm);
-  byId("btnSaveExpense").addEventListener("click", async () => {
-    await saveExpense();
-  });
-
+  renderPage();
+  bindEvents();
+  syncParticipantChips();
   renderDebtsInputs();
   byId("exDate").value = periodToYmd(selectedPeriod);
   renderExpensesList([]);
   startWatch();
 
+  const unsubscribeSelectedPeriod = subscribeSelectedPeriod((nextPeriod) => {
+    if (nextPeriod === selectedPeriod) return;
+    selectedPeriod = nextPeriod;
+    liveExpenses = [];
+    renderPage();
+    bindEvents();
+    syncParticipantChips();
+    renderDebtsInputs();
+    byId("exDate").value = periodToYmd(selectedPeriod);
+    renderExpensesList(liveExpenses);
+    startWatch();
+  });
+
   const onHashChange = () => {
     if (!location.hash.startsWith("#/expenses")) {
       unsubscribeExpenses?.();
+      unsubscribeSelectedPeriod();
       window.removeEventListener("hashchange", onHashChange);
     }
   };

@@ -17,13 +17,6 @@ import { wrapFirestoreError } from "../core/errors";
 import { getPeriod } from "./period.service";
 import { getRentByPeriod } from "./rent.service";
 
-function currentPeriod() {
-  const date = new Date();
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  return `${year}-${month}`;
-}
-
 function normalizeEmail(email) {
   return String(email || "").trim().toLowerCase();
 }
@@ -148,10 +141,9 @@ export async function listGroupMembers(groupId) {
   }
 }
 
-export async function getAdminOverview(groupId) {
+export async function getAdminOverview(groupId, period) {
   try {
     const members = await listGroupMembers(groupId);
-    const period = currentPeriod();
     const [rent, periodDoc] = await Promise.all([
       getRentByPeriod(groupId, period),
       getPeriod(groupId, period),

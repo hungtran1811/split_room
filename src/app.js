@@ -5,6 +5,7 @@ import {
   watchAuth,
 } from "./services/auth.service";
 import {
+  initSelectedPeriod,
   setGroup,
   setMemberProfile,
   setMembers,
@@ -20,6 +21,8 @@ import { renderMatrixPage } from "./ui/pages/matrix.page";
 import { renderRentPage } from "./ui/pages/rent.page";
 import { renderReportsPage } from "./ui/pages/reports.page";
 import { renderAdminPage } from "./ui/pages/admin.page";
+import { renderAuthShell } from "./ui/layout/app-shell";
+import { unmountPrimaryNav } from "./ui/layout/navbar";
 import { ensureDefaultGroup } from "./services/group.service";
 import {
   getCurrentMemberProfile,
@@ -45,22 +48,23 @@ function getRoute() {
 function renderBootScreen() {
   const root = document.getElementById("app");
   if (!root) return;
+  unmountPrimaryNav();
 
   if (bootError) {
-    root.innerHTML = `
-      <div class="app-shell auth-shell">
-        <div class="app-shell__container app-shell__container--sm">
-          <div class="alert alert-danger">
-            <div class="fw-semibold mb-1">Không thể tải dữ liệu</div>
-            <div class="small mb-3">${bootError}</div>
-            <div class="d-flex gap-2">
-              <button class="btn btn-primary" id="btnRetry">Thử lại</button>
-              <button class="btn btn-outline-secondary" id="btnLogout">Đăng xuất</button>
-            </div>
+    root.innerHTML = renderAuthShell({
+      title: "Split Room",
+      subtitle: "Khởi động ứng dụng",
+      content: `
+        <div class="alert alert-danger mb-0">
+          <div class="fw-semibold mb-1">Không thể tải dữ liệu</div>
+          <div class="small mb-3">${bootError}</div>
+          <div class="d-flex gap-2">
+            <button class="btn btn-primary" id="btnRetry">Thử lại</button>
+            <button class="btn btn-outline-secondary" id="btnLogout">Đăng xuất</button>
           </div>
         </div>
-      </div>
-    `;
+      `,
+    });
 
     root.querySelector("#btnRetry")?.addEventListener("click", async () => {
       bootError = null;
@@ -81,21 +85,19 @@ function renderBootScreen() {
   }
 
   if (!redirectResolved || !authReady || bootLoading) {
-    root.innerHTML = `
-      <div class="app-shell auth-shell">
-        <div class="app-shell__container app-shell__container--sm">
-          <div class="auth-shell__card p-4">
-            <div class="d-flex align-items-center gap-3">
-              <div class="spinner-border" role="status" aria-label="Loading"></div>
-              <div>
-                <div class="fw-semibold">Đang tải...</div>
-                <div class="text-secondary small">Vui lòng chờ trong giây lát</div>
-              </div>
-            </div>
+    root.innerHTML = renderAuthShell({
+      title: "Split Room",
+      subtitle: "Đang tải dữ liệu",
+      content: `
+        <div class="d-flex align-items-center gap-3">
+          <div class="spinner-border" role="status" aria-label="Loading"></div>
+          <div>
+            <div class="fw-semibold">Đang tải...</div>
+            <div class="text-secondary small">Vui lòng chờ trong giây lát</div>
           </div>
         </div>
-      </div>
-    `;
+      `,
+    });
   }
 }
 
@@ -274,6 +276,8 @@ async function initAuthFlow() {
 }
 
 export function startApp() {
+  initSelectedPeriod();
+
   if (!window.location.hash || window.location.hash === "#") {
     window.location.hash = "#/dashboard";
   }

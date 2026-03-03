@@ -1,5 +1,10 @@
 import { logout } from "../../services/auth.service";
-import { state } from "../../core/state";
+import {
+  getSelectedPeriod,
+  setSelectedPeriod,
+  state,
+  subscribeSelectedPeriod,
+} from "../../core/state";
 import { formatVND } from "../../config/i18n";
 import {
   getCurrentUserLabel,
@@ -7,35 +12,12 @@ import {
   getUserLabel,
 } from "../../core/display-name";
 import { mapFirestoreError } from "../../core/errors";
-import { showToast } from "../components/toast";
+import { renderAppShell } from "../layout/app-shell";
 import { mountPrimaryNav } from "../layout/navbar";
-import {
-  getMonthlyReportLive,
-  getMonthlyReportSnapshot,
-  listMonthlyReportPeriods,
-  saveMonthlyReportSnapshot,
-} from "../../services/report.service";
+import { getMonthlyReportLive } from "../../services/report.service";
 
 function byId(id) {
   return document.getElementById(id);
-}
-
-function currentPeriod() {
-  const date = new Date();
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  return `${year}-${month}`;
-}
-
-function formatDateTime(value) {
-  if (!value) return "Chưa có";
-  if (typeof value?.toDate === "function") {
-    return value.toDate().toLocaleString("vi-VN");
-  }
-  if (value instanceof Date) {
-    return value.toLocaleString("vi-VN");
-  }
-  return String(value);
 }
 
 function userLabel(value) {
@@ -54,84 +36,78 @@ function userLabel(value) {
 
 function renderSummaryCards(report) {
   const stats = report?.stats || {};
+
   return `
-    <div class="row g-2 mb-3">
-      <div class="col-6 col-lg-3">
-        <div class="card h-100">
-          <div class="card-body">
-            <div class="text-secondary small">Tổng chi tiêu</div>
-            <div class="fw-semibold fs-5">${formatVND(stats.expenseTotal || 0)}</div>
-            <div class="small text-secondary">${stats.expenseCount || 0} khoản</div>
-          </div>
+    <section class="stat-grid">
+      <article class="stat-card">
+        <div class="stat-card__label">Tổng chi tiêu</div>
+        <div class="stat-card__value">${formatVND(stats.expenseTotal || 0)}</div>
+        <div class="stat-card__hint">${stats.expenseCount || 0} khoản</div>
+      </article>
+      <article class="stat-card">
+        <div class="stat-card__label">Thanh toán</div>
+        <div class="stat-card__value">${formatVND(stats.paymentTotal || 0)}</div>
+        <div class="stat-card__hint">${stats.paymentCount || 0} giao dịch</div>
+      </article>
+      <article class="stat-card">
+        <div class="stat-card__label">Tiền nhà</div>
+        <div class="stat-card__value">${formatVND(stats.rentTotal || 0)}</div>
+        <div class="stat-card__hint">
+          ${stats.rentTotal ? "Đã có bản ghi" : "Chưa có bản ghi"}
         </div>
-      </div>
-      <div class="col-6 col-lg-3">
-        <div class="card h-100">
-          <div class="card-body">
-            <div class="text-secondary small">Thanh toán</div>
-            <div class="fw-semibold fs-5">${formatVND(stats.paymentTotal || 0)}</div>
-            <div class="small text-secondary">${stats.paymentCount || 0} giao dịch</div>
-          </div>
-        </div>
-      </div>
-      <div class="col-6 col-lg-3">
-        <div class="card h-100">
-          <div class="card-body">
-            <div class="text-secondary small">Tiền nhà</div>
-            <div class="fw-semibold fs-5">${formatVND(stats.rentTotal || 0)}</div>
-            <div class="small text-secondary">${stats.rentTotal ? "Đã có bản ghi" : "Chưa có bản ghi"}</div>
-          </div>
-        </div>
-      </div>
-      <div class="col-6 col-lg-3">
-        <div class="card h-100">
-          <div class="card-body">
-            <div class="text-secondary small">Cấn trừ cuối kỳ</div>
-            <div class="fw-semibold fs-5">${stats.settlementCount || 0}</div>
-            <div class="small text-secondary">dòng thanh toán</div>
-          </div>
-        </div>
-      </div>
-    </div>
+      </article>
+      <article class="stat-card">
+        <div class="stat-card__label">Cấn trừ cuối kỳ</div>
+        <div class="stat-card__value">${stats.settlementCount || 0}</div>
+        <div class="stat-card__hint">dòng thanh toán</div>
+      </article>
+    </section>
   `;
 }
 
 function renderRentCard(rentSummary) {
   if (!rentSummary) {
     return `
-      <div class="card mb-3">
+      <section class="card section-card">
         <div class="card-header">Tình trạng tiền nhà</div>
-        <div class="card-body text-secondary">Tháng này chưa có bản ghi tiền nhà.</div>
-      </div>
+        <div class="card-body section-card__body">
+          <div class="empty-state">
+            <div class="empty-state__title">Tháng này chưa có bản ghi tiền nhà</div>
+            <div class="empty-state__text">
+              Bạn vẫn có thể xem báo cáo live của chi tiêu và thanh toán.
+            </div>
+          </div>
+        </div>
+      </section>
     `;
   }
 
   return `
-    <div class="card mb-3">
+    <section class="card section-card">
       <div class="card-header">Tình trạng tiền nhà</div>
-      <div class="card-body">
-        <div class="row g-3">
-          <div class="col-6 col-md-3">
-            <div class="text-secondary small">Người trả</div>
-            <div class="fw-semibold">${userLabel(rentSummary.payerId)}</div>
+      <div class="card-body section-card__body">
+        <div class="summary-strip">
+          <div class="summary-strip__item">
+            <span class="summary-strip__label">Người trả</span>
+            <span class="summary-strip__value">${userLabel(rentSummary.payerId)}</span>
           </div>
-          <div class="col-6 col-md-3">
-            <div class="text-secondary small">Tổng tiền nhà</div>
-            <div class="fw-semibold">${formatVND(rentSummary.total || 0)}</div>
+          <div class="summary-strip__item">
+            <span class="summary-strip__label">Tổng tiền nhà</span>
+            <span class="summary-strip__value">${formatVND(rentSummary.total || 0)}</span>
           </div>
-          <div class="col-6 col-md-3">
-            <div class="text-secondary small">Đã thu</div>
-            <div class="fw-semibold text-success">${formatVND(rentSummary.collected || 0)}</div>
+          <div class="summary-strip__item">
+            <span class="summary-strip__label">Đã thu</span>
+            <span class="summary-strip__value">${formatVND(rentSummary.collected || 0)}</span>
           </div>
-          <div class="col-6 col-md-3">
-            <div class="text-secondary small">Còn thiếu</div>
-            <div class="fw-semibold ${
-              Number(rentSummary.remaining || 0) > 0 ? "text-danger" : "text-success"
-            }">${formatVND(rentSummary.remaining || 0)}</div>
+        </div>
+        <div class="summary-strip">
+          <div class="summary-strip__item">
+            <span class="summary-strip__label">Còn thiếu</span>
+            <span class="summary-strip__value">${formatVND(rentSummary.remaining || 0)}</span>
           </div>
         </div>
       </div>
-    </div>
+    </section>
   `;
 }
 
@@ -139,15 +115,20 @@ function renderMemberSummaries(report) {
   const rows = report?.memberSummaries || [];
   if (!rows.length) {
     return `
-      <div class="card mb-3">
+      <section class="card section-card">
         <div class="card-header">Theo từng thành viên</div>
-        <div class="card-body text-secondary">Chưa có dữ liệu thành viên.</div>
-      </div>
+        <div class="card-body section-card__body">
+          <div class="empty-state">
+            <div class="empty-state__title">Chưa có dữ liệu thành viên</div>
+            <div class="empty-state__text">Báo cáo tháng này chưa có gì để tổng hợp.</div>
+          </div>
+        </div>
+      </section>
     `;
   }
 
   return `
-    <div class="card mb-3">
+    <section class="card section-card">
       <div class="card-header">Theo từng thành viên</div>
       <div class="card-body p-0">
         <div class="table-responsive">
@@ -187,74 +168,68 @@ function renderMemberSummaries(report) {
           </table>
         </div>
       </div>
-    </div>
+    </section>
   `;
 }
 
 function renderSettlementPlan(report) {
   const items = report?.settlementPlan || [];
+
   return `
-    <div class="card mb-3">
+    <section class="card section-card">
       <div class="card-header">Cấn trừ cuối kỳ</div>
-      <div class="card-body p-0">
-        <ul class="list-group list-group-flush">
-          ${
-            items.length
-              ? items
+      <div class="card-body section-card__body">
+        ${
+          items.length
+            ? `
+              <div class="action-list">
+                ${items
                   .map(
                     (item) => `
-                      <li class="list-group-item d-flex justify-content-between align-items-center">
-                        <div>
-                          <div class="fw-semibold">${userLabel(item.fromId)} -> ${userLabel(item.toId)}</div>
-                          <div class="small text-secondary">${formatVND(item.amount || 0)}</div>
+                      <article class="action-list__item">
+                        <div class="action-list__head">
+                          <div>
+                            <div class="action-list__title">${userLabel(item.fromId)} -> ${userLabel(item.toId)}</div>
+                            <div class="action-list__meta">${formatVND(item.amount || 0)}</div>
+                          </div>
                         </div>
-                      </li>
+                      </article>
                     `,
                   )
-                  .join("")
-              : '<li class="list-group-item text-secondary">Không có khoản cấn trừ nào.</li>'
-          }
-        </ul>
+                  .join("")}
+              </div>
+            `
+            : `
+              <div class="empty-state">
+                <div class="empty-state__title">Không có khoản cấn trừ nào</div>
+                <div class="empty-state__text">Tháng này không còn khoản nợ nào cần thanh toán thêm.</div>
+              </div>
+            `
+        }
       </div>
-    </div>
+    </section>
   `;
 }
 
-function renderSnapshotHistory(items, activePeriod) {
+function renderLoading(period) {
   return `
-    <div class="card">
-      <div class="card-header">Lịch sử snapshot</div>
-      <div class="card-body p-0">
-        <div class="list-group list-group-flush">
-          ${
-            items.length
-              ? items
-                  .map(
-                    (item) => `
-                      <button
-                        type="button"
-                        class="list-group-item list-group-item-action ${
-                          item.period === activePeriod ? "active" : ""
-                        }"
-                        data-report-period="${item.period}"
-                      >
-                        <div class="d-flex justify-content-between">
-                          <span class="fw-semibold">${item.period}</span>
-                          <span class="small">${formatDateTime(item.snapshotAt)}</span>
-                        </div>
-                        <div class="small ${
-                          item.period === activePeriod ? "text-white-50" : "text-secondary"
-                        }">
-                          ${userLabel(item.snapshotBy)} • ${item.stats?.settlementCount || 0} dòng cấn trừ
-                        </div>
-                      </button>
-                    `,
-                  )
-                  .join("")
-              : '<div class="list-group-item text-secondary">Chưa có snapshot nào.</div>'
-          }
+    <section class="card section-card">
+      <div class="card-body d-flex align-items-center gap-3">
+        <div class="spinner-border" role="status" aria-label="Loading"></div>
+        <div>
+          <div class="fw-semibold">Đang tải báo cáo tháng ${period}...</div>
+          <div class="text-secondary small">Vui lòng chờ trong giây lát</div>
         </div>
       </div>
+    </section>
+  `;
+}
+
+function renderError(message) {
+  return `
+    <div class="alert alert-danger mb-0">
+      <div class="fw-semibold mb-1">Không thể tải báo cáo</div>
+      <div class="small">${message}</div>
     </div>
   `;
 }
@@ -264,114 +239,44 @@ export async function renderReportsPage() {
 
   const app = document.querySelector("#app");
   const groupId = state.groupId;
-  let period = currentPeriod();
+  let period = getSelectedPeriod();
   let loading = true;
-  let saving = false;
   let errorMessage = "";
   let liveReport = null;
-  let snapshotReport = null;
-  let snapshotPeriods = [];
   let loadToken = 0;
   let disposed = false;
 
-  function activeReport() {
-    return snapshotReport || liveReport;
-  }
-
   function render() {
-    const report = activeReport();
-    const showingSnapshot = !!snapshotReport;
-
-    app.innerHTML = `
-      <div class="app-shell" data-page="reports">
-        <div class="app-shell__container">
-          <div class="app-shell__header">
-            <div class="app-shell__title-block">
-              <h1 class="app-shell__title">Báo cáo tháng</h1>
-              <div class="app-shell__meta">Đăng nhập: ${getCurrentUserLabel(state)}</div>
-              <div class="app-shell__meta">Nhóm: <b>${groupId}</b></div>
-            </div>
-            <div id="primaryNavHost" class="app-shell__nav-host"></div>
-          </div>
-
-        <div class="row g-3 mb-3">
-          <div class="col-12 col-lg-8">
-            <div class="card">
-              <div class="card-body">
-                <div class="row g-3 align-items-end">
-                  <div class="col-12 col-md-4">
-                    <label class="form-label small mb-1">Chọn tháng</label>
-                    <input id="reportPeriod" type="month" class="form-control" value="${period}" />
-                  </div>
-                  <div class="col-12 col-md-8">
-                    <div class="d-flex flex-wrap gap-2 align-items-center">
-                      <span class="badge ${showingSnapshot ? "bg-success" : "bg-warning text-dark"}">
-                        ${showingSnapshot ? "Đã lưu snapshot" : "Đang xem dữ liệu live"}
-                      </span>
-                      ${
-                        showingSnapshot
-                          ? `<span class="small text-secondary">Lưu lúc ${formatDateTime(report?.meta?.snapshotAt)} bởi ${userLabel(report?.meta?.snapshotBy)}</span>`
-                          : '<span class="small text-secondary">Báo cáo này đang tính trực tiếp từ dữ liệu hiện tại.</span>'
-                      }
-                    </div>
-                    ${
-                      state.canOperateMonth
-                        ? `
-                          <div class="d-flex gap-2 mt-3">
-                            <button id="btnSaveSnapshot" class="btn btn-primary btn-sm" ${
-                              saving || !liveReport ? "disabled" : ""
-                            }>
-                              ${saving ? "Đang lưu..." : showingSnapshot ? "Lưu lại snapshot" : "Lưu snapshot tháng"}
-                            </button>
-                            <div class="small text-secondary align-self-center">Nút này luôn lưu từ dữ liệu live hiện tại.</div>
-                          </div>
-                        `
-                        : '<div class="small text-secondary mt-3">Bạn chỉ có quyền xem báo cáo và snapshot đã lưu.</div>'
-                    }
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-          <div class="col-12 col-lg-4">
-            ${renderSnapshotHistory(snapshotPeriods, period)}
-          </div>
+    app.innerHTML = renderAppShell({
+      pageId: "reports",
+      title: "Báo cáo tháng",
+      subtitle: "Tổng hợp theo dữ liệu live",
+      meta: [
+        `Đăng nhập: ${getCurrentUserLabel(state)}`,
+        `Nhóm: ${groupId}`,
+      ],
+      showPeriodFilter: true,
+      period,
+      content: `
+        <div class="info-banner">
+          <span class="fw-semibold">Báo cáo live</span>
+          <span>Báo cáo này được tính trực tiếp từ chi tiêu, thanh toán và tiền nhà của tháng đang xem.</span>
         </div>
 
         ${
           loading
-            ? `
-              <div class="d-flex align-items-center gap-3 py-4">
-                <div class="spinner-border" role="status" aria-label="Loading"></div>
-                <div>
-                  <div class="fw-semibold">Đang tải báo cáo tháng ${period}...</div>
-                  <div class="text-secondary small">Vui lòng chờ trong giây lát</div>
-                </div>
-              </div>
-            `
+            ? renderLoading(period)
             : errorMessage
-              ? `
-                <div class="alert alert-danger">
-                  <div class="fw-semibold mb-1">Không thể tải báo cáo</div>
-                  <div class="small">${errorMessage}</div>
-                </div>
-              `
+              ? renderError(errorMessage)
               : `
-                ${renderSummaryCards(report)}
-                ${renderRentCard(report?.rentSummary)}
-                <div class="row g-3">
-                  <div class="col-12 col-lg-7">
-                    ${renderMemberSummaries(report)}
-                  </div>
-                  <div class="col-12 col-lg-5">
-                    ${renderSettlementPlan(report)}
-                  </div>
-                </div>
+                ${renderSummaryCards(liveReport)}
+                ${renderRentCard(liveReport?.rentSummary)}
+                ${renderMemberSummaries(liveReport)}
+                ${renderSettlementPlan(liveReport)}
               `
         }
-        </div>
-      </div>
-    `;
+      `,
+    });
 
     mountPrimaryNav({
       active: "reports",
@@ -380,24 +285,11 @@ export async function renderReportsPage() {
       onLogout: async () => {
         await logout();
       },
+      userLabel: getCurrentUserLabel(state),
     });
 
-    byId("reportPeriod")?.addEventListener("change", async (event) => {
-      period = event.target.value || currentPeriod();
-      await loadData();
-    });
-
-    byId("btnSaveSnapshot")?.addEventListener("click", async () => {
-      await handleSaveSnapshot();
-    });
-
-    app.querySelectorAll("[data-report-period]").forEach((button) => {
-      button.addEventListener("click", async () => {
-        const nextPeriod = button.getAttribute("data-report-period");
-        if (!nextPeriod || nextPeriod === period) return;
-        period = nextPeriod;
-        await loadData();
-      });
+    byId("globalPeriodPicker")?.addEventListener("change", (event) => {
+      setSelectedPeriod(event.target.value);
     });
   }
 
@@ -408,17 +300,11 @@ export async function renderReportsPage() {
     render();
 
     try {
-      const [live, snapshot, periods] = await Promise.all([
-        getMonthlyReportLive(groupId, period),
-        getMonthlyReportSnapshot(groupId, period),
-        listMonthlyReportPeriods(groupId),
-      ]);
+      const live = await getMonthlyReportLive(groupId, period);
 
       if (disposed || token !== loadToken) return;
 
       liveReport = live;
-      snapshotReport = snapshot;
-      snapshotPeriods = periods;
       loading = false;
       render();
     } catch (error) {
@@ -430,35 +316,16 @@ export async function renderReportsPage() {
     }
   }
 
-  async function handleSaveSnapshot() {
-    if (!state.canOperateMonth || !liveReport || saving) return;
-
-    saving = true;
-    render();
-
-    try {
-      await saveMonthlyReportSnapshot(groupId, period, liveReport, state.user);
-      showToast({
-        title: "Thành công",
-        message: `Đã lưu snapshot báo cáo tháng ${period}.`,
-        variant: "success",
-      });
-      saving = false;
-      await loadData();
-    } catch (error) {
-      saving = false;
-      render();
-      showToast({
-        title: "Thất bại",
-        message: mapFirestoreError(error, "Không thể lưu snapshot báo cáo."),
-        variant: "danger",
-      });
-    }
-  }
+  const unsubscribeSelectedPeriod = subscribeSelectedPeriod(async (nextPeriod) => {
+    if (nextPeriod === period) return;
+    period = nextPeriod;
+    await loadData();
+  });
 
   const onHashChange = () => {
     if (!location.hash.startsWith("#/reports")) {
       disposed = true;
+      unsubscribeSelectedPeriod();
       window.removeEventListener("hashchange", onHashChange);
     }
   };

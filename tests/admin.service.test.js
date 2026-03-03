@@ -108,7 +108,7 @@ describe("admin service", () => {
       snapshot: {},
     });
 
-    const overview = await getAdminOverview("P102");
+    const overview = await getAdminOverview("P102", "2026-03");
 
     expect(overview.owner?.memberId).toBe("hung");
     expect(overview.backupAdmin?.memberId).toBe("thinh");

@@ -1,12 +1,17 @@
 import { logout } from "../../services/auth.service";
-import { state } from "../../core/state";
+import {
+  getSelectedPeriod,
+  state,
+  subscribeSelectedPeriod,
+} from "../../core/state";
 import { getCurrentUserLabel, getUserLabel } from "../../core/display-name";
 import { ALLOWED_EMAILS } from "../../config/constants";
 import { EMAIL_TO_MEMBER_ID } from "../../config/members.map";
 import { mapFirestoreError } from "../../core/errors";
 import { showToast } from "../components/toast";
 import { openConfirmModal } from "../components/confirmModal";
-import { mountPrimaryNav } from "../layout/navbar";
+import { renderAuthShell, renderAppShell } from "../layout/app-shell";
+import { mountPrimaryNav, unmountPrimaryNav } from "../layout/navbar";
 import {
   demoteBackupAdmin,
   getAdminOverview,
@@ -21,9 +26,9 @@ function roleLabel(role) {
 }
 
 function roleBadgeClass(role) {
-  if (role === "owner") return "bg-danger";
-  if (role === "admin") return "bg-warning text-dark";
-  return "bg-secondary";
+  if (role === "owner") return "text-bg-danger";
+  if (role === "admin") return "text-bg-warning";
+  return "text-bg-secondary";
 }
 
 function diagnosticsHtml(items = []) {
@@ -43,26 +48,167 @@ function memberLabel(member) {
   return getUserLabel(member);
 }
 
+function renderOverviewCards(overview) {
+  return `
+    <section class="stat-grid">
+      <article class="stat-card">
+        <div class="stat-card__label">Admin chính</div>
+        <div class="stat-card__value stat-card__value--compact">${
+          overview?.owner ? memberLabel(overview.owner) : "Chưa có"
+        }</div>
+        <div class="stat-card__hint">Owner cố định của nhóm</div>
+      </article>
+      <article class="stat-card">
+        <div class="stat-card__label">Admin phụ</div>
+        <div class="stat-card__value stat-card__value--compact">${
+          overview?.backupAdmin ? memberLabel(overview.backupAdmin) : "Chưa có"
+        }</div>
+        <div class="stat-card__hint">Tối đa một người</div>
+      </article>
+      <article class="stat-card">
+        <div class="stat-card__label">Số thành viên</div>
+        <div class="stat-card__value">${overview?.memberCount || 0}</div>
+        <div class="stat-card__hint">Đã có hồ sơ trong nhóm</div>
+      </article>
+      <article class="stat-card">
+        <div class="stat-card__label">Allowlist</div>
+        <div class="stat-card__value">${ALLOWED_EMAILS.length}</div>
+        <div class="stat-card__hint">Đang quản lý ngoài app</div>
+      </article>
+    </section>
+  `;
+}
+
+function renderHealthCard(overview) {
+  return `
+    <section class="card section-card">
+      <div class="card-header">Sức khỏe dữ liệu nhóm</div>
+      <div class="card-body section-card__body">
+        <div class="summary-strip">
+          <div class="summary-strip__item">
+            <span class="summary-strip__label">Thiếu memberId</span>
+            <span class="summary-strip__value">${
+              overview?.diagnostics?.missingMemberId?.length || 0
+            }</span>
+          </div>
+          <div class="summary-strip__item">
+            <span class="summary-strip__label">Role legacy</span>
+            <span class="summary-strip__value">${
+              overview?.diagnostics?.legacyRoles?.length || 0
+            }</span>
+          </div>
+          <div class="summary-strip__item">
+            <span class="summary-strip__label">Email mismatch</span>
+            <span class="summary-strip__value">${
+              overview?.diagnostics?.emailMapMismatch?.length || 0
+            }</span>
+          </div>
+        </div>
+        <div class="summary-strip">
+          <div class="summary-strip__item">
+            <span class="summary-strip__label">Không nằm trong roster</span>
+            <span class="summary-strip__value">${
+              overview?.diagnostics?.unknownRosterMembers?.length || 0
+            }</span>
+          </div>
+          <div class="summary-strip__item">
+            <span class="summary-strip__label">Tiền nhà tháng hiện tại</span>
+            <span class="summary-strip__value">${
+              overview?.currentPeriodStatus?.rentExists ? "Đã có" : "Chưa có"
+            }</span>
+          </div>
+        </div>
+      </div>
+    </section>
+  `;
+}
+
+function renderMembersTable(members, actionPending) {
+  return `
+    <section class="card section-card">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span>Danh sách thành viên</span>
+        <span class="small text-secondary">
+          ${
+            actionPending
+              ? "Đang cập nhật quyền..."
+              : "Chỉ admin chính mới đổi được admin phụ"
+          }
+        </span>
+      </div>
+      <div class="card-body p-0">
+        <div class="table-responsive">
+          <table class="table table-sm align-middle mb-0">
+            <thead>
+              <tr>
+                <th>Tên</th>
+                <th>memberId</th>
+                <th>Email</th>
+                <th>UID</th>
+                <th>Role</th>
+                <th>Trạng thái</th>
+                <th class="text-end">Hành động</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${members
+                .map(
+                  (member) => `
+                    <tr>
+                      <td class="fw-semibold">${memberLabel(member)}</td>
+                      <td>${member.memberId || "-"}</td>
+                      <td>${member.email || "-"}</td>
+                      <td><code class="small">${member.uid || "-"}</code></td>
+                      <td><span class="badge ${roleBadgeClass(member.role)}">${roleLabel(member.role)}</span></td>
+                      <td>${diagnosticsHtml(member.diagnostics)}</td>
+                      <td class="text-end">
+                        ${
+                          member.role === "owner"
+                            ? '<span class="small text-secondary">Cố định</span>'
+                            : member.role === "admin"
+                              ? `<button class="btn ui-action-pill ui-action-pill--danger section-cta" data-action="demote" data-uid="${member.uid}" ${
+                                  actionPending ? "disabled" : ""
+                                }>Gỡ admin phụ</button>`
+                              : `<button class="btn ui-action-pill ui-action-pill--secondary section-cta" data-action="promote" data-uid="${member.uid}" ${
+                                  actionPending ? "disabled" : ""
+                                }>Đặt làm admin phụ</button>`
+                        }
+                      </td>
+                    </tr>
+                  `,
+                )
+                .join("")}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  `;
+}
+
 export async function renderAdminPage() {
   if (!state.user || !state.groupId) return;
 
   const app = document.querySelector("#app");
 
   if (!state.isOwner) {
-    app.innerHTML = `
-      <div class="app-shell auth-shell">
-        <div class="app-shell__container app-shell__container--sm">
-          <div class="alert alert-danger">
-            <div class="fw-semibold mb-2">403 / Không có quyền truy cập</div>
-            <div class="small mb-3">Chỉ admin chính mới được vào trang quản trị nhóm.</div>
-            <div class="d-flex gap-2">
-              <a class="btn btn-primary btn-sm" href="#/dashboard">Về Dashboard</a>
-              <a class="btn btn-outline-secondary btn-sm" href="#/reports">Báo cáo</a>
-            </div>
+    unmountPrimaryNav();
+    app.innerHTML = renderAuthShell({
+      title: "Quản trị nhóm",
+      subtitle: "403 / Không có quyền truy cập",
+      content: `
+        <div class="alert alert-danger mb-0">
+          <div class="fw-semibold mb-2">Chỉ admin chính mới được vào trang quản trị.</div>
+          <div class="small mb-3">
+            Bạn vẫn có thể quay về dashboard hoặc tiếp tục xem báo cáo của nhóm.
+          </div>
+          <div class="d-flex gap-2">
+            <a class="btn ui-action-pill ui-action-pill--primary" href="#/dashboard">Về Dashboard</a>
+            <a class="btn ui-action-pill ui-action-pill--secondary" href="#/reports">Báo cáo</a>
           </div>
         </div>
-      </div>
-    `;
+      `,
+    });
     return;
   }
 
@@ -73,164 +219,52 @@ export async function renderAdminPage() {
   let overview = null;
   let loadToken = 0;
   let disposed = false;
+  let selectedPeriod = getSelectedPeriod();
 
   function render() {
-    app.innerHTML = `
-      <div class="app-shell" data-page="admin">
-        <div class="app-shell__container">
-          <div class="app-shell__header">
-            <div class="app-shell__title-block">
-              <h1 class="app-shell__title">Quản trị nhóm</h1>
-              <div class="app-shell__meta">Đăng nhập: ${getCurrentUserLabel(state)}</div>
-              <div class="app-shell__meta">Nhóm: <b>${state.groupId}</b></div>
-            </div>
-            <div id="primaryNavHost" class="app-shell__nav-host"></div>
-          </div>
+    app.innerHTML = renderAppShell({
+      pageId: "admin",
+      title: "Quản trị nhóm",
+      subtitle: "Quyền thành viên và sức khỏe dữ liệu",
+      meta: [
+        `Đăng nhập: ${getCurrentUserLabel(state)}`,
+        `Nhóm: ${state.groupId}`,
+        `Tháng đang xem: ${selectedPeriod}`,
+      ],
+      content: `
+        <div class="info-banner">
+          <span class="fw-semibold">Allowlist và email map vẫn đang quản lý ngoài app</span>
+          <span>Hiện có ${Object.keys(EMAIL_TO_MEMBER_ID).length} mapping email -> memberId được hard-code trong cấu hình.</span>
+        </div>
 
         ${
           loading
             ? `
-              <div class="d-flex align-items-center gap-3 py-4">
-                <div class="spinner-border" role="status" aria-label="Loading"></div>
-                <div>
-                  <div class="fw-semibold">Đang tải dữ liệu quản trị...</div>
-                  <div class="text-secondary small">Vui lòng chờ trong giây lát</div>
+              <section class="card section-card">
+                <div class="card-body d-flex align-items-center gap-3">
+                  <div class="spinner-border" role="status" aria-label="Loading"></div>
+                  <div>
+                    <div class="fw-semibold">Đang tải dữ liệu quản trị...</div>
+                    <div class="text-secondary small">Vui lòng chờ trong giây lát</div>
+                  </div>
                 </div>
-              </div>
+              </section>
             `
             : errorMessage
               ? `
-                <div class="alert alert-danger">
+                <div class="alert alert-danger mb-0">
                   <div class="fw-semibold mb-1">Không thể tải trang quản trị</div>
                   <div class="small">${errorMessage}</div>
                 </div>
               `
               : `
-                <div class="row g-3 mb-3">
-                  <div class="col-12 col-lg-7">
-                    <div class="card h-100">
-                      <div class="card-header">Tổng quan quyền</div>
-                      <div class="card-body">
-                        <div class="row g-3">
-                          <div class="col-12 col-md-6">
-                            <div class="text-secondary small">Admin chính</div>
-                            <div class="fw-semibold">${overview?.owner ? memberLabel(overview.owner) : "Chưa có"}</div>
-                          </div>
-                          <div class="col-12 col-md-6">
-                            <div class="text-secondary small">Admin phụ</div>
-                            <div class="fw-semibold">${overview?.backupAdmin ? memberLabel(overview.backupAdmin) : "Chưa có"}</div>
-                          </div>
-                          <div class="col-12 col-md-6">
-                            <div class="text-secondary small">Số thành viên</div>
-                            <div class="fw-semibold">${overview?.memberCount || 0}</div>
-                          </div>
-                          <div class="col-12 col-md-6">
-                            <div class="text-secondary small">Allowlist</div>
-                            <div class="fw-semibold">Quản lý ngoài app</div>
-                            <div class="small text-secondary">${ALLOWED_EMAILS.length} email đang hard-code trong rules/config</div>
-                          </div>
-                          <div class="col-12">
-                            <div class="text-secondary small">Mapping memberId</div>
-                            <div class="small text-secondary">
-                              memberId hiện đang hard-code theo email map với ${Object.keys(EMAIL_TO_MEMBER_ID).length} mục.
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div class="col-12 col-lg-5">
-                    <div class="card h-100">
-                      <div class="card-header">Sức khỏe dữ liệu nhóm</div>
-                      <div class="card-body">
-                        <div class="d-flex justify-content-between mb-2">
-                          <span class="text-secondary small">Thiếu memberId</span>
-                          <span class="fw-semibold">${overview?.diagnostics?.missingMemberId?.length || 0}</span>
-                        </div>
-                        <div class="d-flex justify-content-between mb-2">
-                          <span class="text-secondary small">Role legacy</span>
-                          <span class="fw-semibold">${overview?.diagnostics?.legacyRoles?.length || 0}</span>
-                        </div>
-                        <div class="d-flex justify-content-between mb-2">
-                          <span class="text-secondary small">Email không khớp map</span>
-                          <span class="fw-semibold">${overview?.diagnostics?.emailMapMismatch?.length || 0}</span>
-                        </div>
-                        <div class="d-flex justify-content-between mb-3">
-                          <span class="text-secondary small">Không nằm trong roster</span>
-                          <span class="fw-semibold">${overview?.diagnostics?.unknownRosterMembers?.length || 0}</span>
-                        </div>
-                        <hr />
-                        <div class="d-flex justify-content-between mb-2">
-                          <span class="text-secondary small">Tiền nhà tháng hiện tại</span>
-                          <span class="badge ${overview?.currentPeriodStatus?.rentExists ? "bg-success" : "bg-secondary"}">
-                            ${overview?.currentPeriodStatus?.rentExists ? "Đã có" : "Chưa có"}
-                          </span>
-                        </div>
-                        <div class="d-flex justify-content-between">
-                          <span class="text-secondary small">Snapshot báo cáo tháng hiện tại</span>
-                          <span class="badge ${overview?.currentPeriodStatus?.reportSnapshotExists ? "bg-success" : "bg-secondary"}">
-                            ${overview?.currentPeriodStatus?.reportSnapshotExists ? "Đã có" : "Chưa có"}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div class="card">
-                  <div class="card-header d-flex justify-content-between align-items-center">
-                    <div>Danh sách thành viên</div>
-                    <div class="small text-secondary">${actionPending ? "Đang cập nhật quyền..." : "Chỉ admin chính mới được đổi admin phụ"}</div>
-                  </div>
-                  <div class="card-body p-0">
-                    <div class="table-responsive">
-                      <table class="table table-sm align-middle mb-0">
-                        <thead>
-                          <tr>
-                            <th>Tên</th>
-                            <th>memberId</th>
-                            <th>Email</th>
-                            <th>UID</th>
-                            <th>Role</th>
-                            <th>Trạng thái</th>
-                            <th class="text-end">Hành động</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          ${members
-                            .map(
-                              (member) => `
-                                <tr>
-                                  <td class="fw-semibold">${memberLabel(member)}</td>
-                                  <td>${member.memberId || "-"}</td>
-                                  <td>${member.email || "-"}</td>
-                                  <td><code class="small">${member.uid || "-"}</code></td>
-                                  <td><span class="badge ${roleBadgeClass(member.role)}">${roleLabel(member.role)}</span></td>
-                                  <td>${diagnosticsHtml(member.diagnostics)}</td>
-                                  <td class="text-end">
-                                    ${
-                                      member.role === "owner"
-                                        ? '<span class="small text-secondary">Cố định</span>'
-                                        : member.role === "admin"
-                                          ? `<button class="btn btn-outline-danger btn-sm" data-action="demote" data-uid="${member.uid}" ${actionPending ? "disabled" : ""}>Gỡ admin phụ</button>`
-                                          : `<button class="btn btn-outline-primary btn-sm" data-action="promote" data-uid="${member.uid}" ${actionPending ? "disabled" : ""}>Đặt làm admin phụ</button>`
-                                    }
-                                  </td>
-                                </tr>
-                              `,
-                            )
-                            .join("")}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                </div>
+                ${renderOverviewCards(overview)}
+                ${renderHealthCard(overview)}
+                ${renderMembersTable(members, actionPending)}
               `
         }
-        </div>
-      </div>
-    `;
+      `,
+    });
 
     mountPrimaryNav({
       active: "admin",
@@ -239,6 +273,7 @@ export async function renderAdminPage() {
       onLogout: async () => {
         await logout();
       },
+      userLabel: getCurrentUserLabel(state),
     });
 
     app.querySelectorAll("[data-action='promote']").forEach((button) => {
@@ -296,7 +331,7 @@ export async function renderAdminPage() {
     try {
       const [nextMembers, nextOverview] = await Promise.all([
         listGroupMembers(state.groupId),
-        getAdminOverview(state.groupId),
+        getAdminOverview(state.groupId, selectedPeriod),
       ]);
 
       if (disposed || token !== loadToken) return;
@@ -307,7 +342,10 @@ export async function renderAdminPage() {
     } catch (error) {
       if (disposed || token !== loadToken) return;
       loading = false;
-      errorMessage = mapFirestoreError(error, "Không thể tải dữ liệu quản trị.");
+      errorMessage = mapFirestoreError(
+        error,
+        "Không thể tải dữ liệu quản trị.",
+      );
       render();
     }
   }
@@ -337,9 +375,16 @@ export async function renderAdminPage() {
     }
   }
 
+  const unsubscribeSelectedPeriod = subscribeSelectedPeriod(async (nextPeriod) => {
+    if (nextPeriod === selectedPeriod) return;
+    selectedPeriod = nextPeriod;
+    await loadData();
+  });
+
   const onHashChange = () => {
     if (!location.hash.startsWith("#/admin")) {
       disposed = true;
+      unsubscribeSelectedPeriod();
       window.removeEventListener("hashchange", onHashChange);
     }
   };

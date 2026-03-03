@@ -1,9 +1,17 @@
 import { logout } from "../../services/auth.service";
-import { state } from "../../core/state";
+import {
+  getSelectedPeriod,
+  setSelectedPeriod,
+  state,
+  subscribeSelectedPeriod,
+} from "../../core/state";
 import { ROSTER_IDS, nameOf } from "../../config/roster";
 import { formatVND } from "../../config/i18n";
 import { showToast } from "../components/toast";
+import { renderAppShell } from "../layout/app-shell";
 import { mountPrimaryNav } from "../layout/navbar";
+import { renderMoneyStatCard } from "../components/moneyStatCard";
+import { renderSectionHeader } from "../components/sectionHeader";
 import {
   buildEqualShares,
   clampNonNegative,
@@ -22,18 +30,12 @@ import {
   upsertRentByPeriod,
   watchRentByPeriod,
 } from "../../services/rent.service";
+import { getCurrentUserLabel } from "../../core/display-name";
 
 let unsubscribeRent = null;
 
 function byId(id) {
   return document.getElementById(id);
-}
-
-function currentPeriod() {
-  const date = new Date();
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  return `${year}-${month}`;
 }
 
 function emptyPaid() {
@@ -68,159 +70,189 @@ export async function renderRentPage() {
   const payerId = "hung";
   const canEdit = state.canOperateMonth;
   const app = document.querySelector("#app");
+  const currentUserLabel = getCurrentUserLabel(state);
+  const initialPeriod = getSelectedPeriod();
 
-  app.innerHTML = `
-    <div class="app-shell" data-page="rent">
-      <div class="app-shell__container">
-        <div class="app-shell__header">
-          <div class="app-shell__title-block">
-            <h1 class="app-shell__title">Tiền nhà</h1>
-            <div class="app-shell__meta">Người trả chủ nhà: <b>${nameOf(payerId)}</b></div>
-          </div>
-          <div id="primaryNavHost" class="app-shell__nav-host"></div>
-        </div>
+  app.innerHTML = renderAppShell({
+    pageId: "rent",
+    title: "Tiền nhà",
+    subtitle: "Theo dõi thu tiền trong tháng",
+    meta: [
+      `Người trả chủ nhà: ${nameOf(payerId)}`,
+      `Đăng nhập: ${currentUserLabel}`,
+      `Nhóm: ${groupId}`,
+    ],
+    showPeriodFilter: true,
+    period: initialPeriod,
+    content: `
+      <section class="money-grid money-grid--3">
+        ${renderMoneyStatCard({
+          label: "Tổng tiền nhà",
+          value: '<span id="rentTotalStrip">0 đ</span>',
+          tone: "warning",
+          size: "lg",
+        })}
+        ${renderMoneyStatCard({
+          label: "Đã thu",
+          value: '<span id="collectedStrip">0 đ</span>',
+          tone: "positive",
+          size: "lg",
+        })}
+        ${renderMoneyStatCard({
+          label: "Còn thiếu",
+          value: '<span id="totalDueStrip">0 đ</span>',
+          tone: "danger",
+          size: "lg",
+        })}
+      </section>
 
-      <div class="row g-2 align-items-end mb-3">
-        <div class="col-6 col-md-4">
-          <label class="form-label small mb-1">Chọn tháng</label>
-          <input id="rentPeriod" type="month" class="form-control" />
-        </div>
-      </div>
-
-      <div id="rentEditableArea" class="row g-3">
-        <div class="col-12 col-lg-6">
-          <div class="card" id="rentFormCard">
-            <div class="card-header">1) Khoản tiền tháng này</div>
-            <div class="card-body">
-              <div class="row g-2">
-                <div class="col-6">
-                  <label class="form-label">Tiền thuê</label>
-                  <input id="it_rent" class="form-control" placeholder="VD: 6000000" />
-                </div>
-                <div class="col-6">
-                  <label class="form-label">Số người ở</label>
-                  <input id="headcount" class="form-control" placeholder="VD: 4" />
-                </div>
-                <div class="col-6">
-                  <label class="form-label">Nước / người</label>
-                  <input id="waterUnit" class="form-control" placeholder="VD: 100000" />
-                </div>
-                <div class="col-12">
-                  <div class="d-flex justify-content-between small">
-                    <span class="text-secondary">Tiền nước thực tế</span>
-                    <span class="fw-semibold" id="waterCostTxt">0 đ</span>
-                  </div>
-                </div>
-
-                <hr class="my-2" />
-
-                <div class="col-4">
-                  <label class="form-label">Điện cũ</label>
-                  <input id="elecOld" class="form-control" placeholder="VD: 11008" />
-                </div>
-                <div class="col-4">
-                  <label class="form-label">Điện mới</label>
-                  <input id="elecNew" class="form-control" placeholder="VD: 11214" />
-                </div>
-                <div class="col-4">
-                  <label class="form-label">Giá điện / số</label>
-                  <input id="elecUnit" class="form-control" placeholder="VD: 4000" />
-                </div>
-                <div class="col-12">
-                  <div class="d-flex justify-content-between small">
-                    <span class="text-secondary">Số điện dùng</span>
-                    <span class="fw-semibold" id="kwhUsedTxt">0</span>
-                  </div>
-                  <div class="d-flex justify-content-between small">
-                    <span class="text-secondary">Tiền điện thực tế</span>
-                    <span class="fw-semibold" id="elecCostTxt">0 đ</span>
-                  </div>
-                </div>
-
-                <div class="col-6">
-                  <label class="form-label">Wifi</label>
-                  <input id="it_wifi" class="form-control" placeholder="VD: 150000" />
-                </div>
-                <div class="col-12">
-                  <label class="form-label">Khác</label>
-                  <input id="it_other" class="form-control" placeholder="0" />
-                </div>
-                <div class="col-12 mt-2">
-                  <div class="d-flex justify-content-between">
-                    <span class="text-secondary">Tổng</span>
-                    <span class="fw-semibold" id="rentTotal">0 đ</span>
-                  </div>
-                </div>
-                <div class="col-12">
-                  <label class="form-label">Ghi chú</label>
-                  <input id="rentNote" class="form-control" placeholder="VD: Tiền nhà tháng này" />
-                </div>
+      <div id="rentEditableArea" class="section-stack">
+        <section class="card section-card" id="rentFormCard">
+          <div class="card-body section-card__body">
+            ${renderSectionHeader({
+              title: "1. Khoản tiền tháng này",
+              subtitle: "Nhập các khoản gốc để hệ thống tự tính tổng tiền nhà.",
+            })}
+            <div class="row g-3">
+              <div class="col-6">
+                <label class="form-label">Tiền thuê</label>
+                <input id="it_rent" class="form-control" placeholder="VD: 6000000" />
               </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="col-12 col-lg-6">
-          <div class="card" id="rentShareCard">
-            <div class="card-header d-flex justify-content-between align-items-center">
-              <div>2) Chia tiền</div>
-              <div class="form-check">
-                <input class="form-check-input" type="checkbox" id="splitEqual" checked>
-                <label class="form-check-label" for="splitEqual">Chia đều</label>
+              <div class="col-6">
+                <label class="form-label">Số người ở</label>
+                <input id="headcount" class="form-control" placeholder="VD: 4" />
               </div>
-            </div>
-            <div class="card-body">
-              <div id="sharesBox" class="row g-2"></div>
-              <div class="mt-2">
+              <div class="col-6">
+                <label class="form-label">Nước / người</label>
+                <input id="waterUnit" class="form-control" placeholder="VD: 100000" />
+              </div>
+              <div class="col-12">
                 <div class="d-flex justify-content-between small">
-                  <span class="text-secondary">Tổng phần chia</span>
-                  <span class="fw-semibold" id="sharesSum">0 đ</span>
+                  <span class="text-secondary">Tiền nước thực tế</span>
+                  <span class="fw-semibold" id="waterCostTxt">0 đ</span>
                 </div>
-                <div class="small text-danger" id="sharesErr" style="min-height:18px;"></div>
               </div>
-            </div>
-          </div>
-        </div>
 
-        <div class="col-12">
-          <div class="card" id="rentPaidCard">
-            <div class="card-header">3) Mọi người đã chuyển cho ${nameOf(
-              payerId,
-            )} bao nhiêu</div>
-            <div class="card-body">
-              <div id="paidBox" class="row g-2"></div>
-              <hr class="my-3" />
-              <div class="row g-2">
-                <div class="col-md-3">
-                  <div class="text-secondary small">Đã thu từ mọi người</div>
-                  <div class="fw-semibold" id="collected">0 đ</div>
+              <div class="col-4">
+                <label class="form-label">Điện cũ</label>
+                <input id="elecOld" class="form-control" placeholder="VD: 11008" />
+              </div>
+              <div class="col-4">
+                <label class="form-label">Điện mới</label>
+                <input id="elecNew" class="form-control" placeholder="VD: 11214" />
+              </div>
+              <div class="col-4">
+                <label class="form-label">Giá điện / số</label>
+                <input id="elecUnit" class="form-control" placeholder="VD: 4000" />
+              </div>
+              <div class="col-12">
+                <div class="d-flex justify-content-between small">
+                  <span class="text-secondary">Số điện dùng</span>
+                  <span class="fw-semibold" id="kwhUsedTxt">0</span>
                 </div>
-                <div class="col-md-3">
-                  <div class="text-secondary small">${nameOf(
-                    payerId,
-                  )} đang gánh</div>
-                  <div class="fw-semibold" id="payerBurden">0 đ</div>
-                </div>
-                <div class="col-md-3">
-                  <div class="text-secondary small">Còn thiếu (tổng)</div>
-                  <div class="fw-semibold" id="totalDue">0 đ</div>
-                </div>
-                <div class="col-md-3">
-                  <div class="text-secondary small">Cập nhật cuối</div>
-                  <div class="fw-semibold small" id="rentUpdated">Chưa có</div>
+                <div class="d-flex justify-content-between small">
+                  <span class="text-secondary">Tiền điện thực tế</span>
+                  <span class="fw-semibold" id="elecCostTxt">0 đ</span>
                 </div>
               </div>
-              <div class="d-flex flex-wrap gap-2 mt-3">
-                <button id="btnSaveRent" type="button" class="btn btn-primary">Lưu</button>
-                <button id="btnClearPaid" type="button" class="btn btn-outline-secondary">Clear đã chuyển</button>
-                <div class="small text-danger align-self-center" id="rentMsg"></div>
+
+              <div class="col-6">
+                <label class="form-label">Wifi</label>
+                <input id="it_wifi" class="form-control" placeholder="VD: 150000" />
+              </div>
+              <div class="col-12">
+                <label class="form-label">Khác</label>
+                <input id="it_other" class="form-control" placeholder="0" />
+              </div>
+
+              <div class="col-12">
+                <div class="money-grid money-grid--3">
+                  ${renderMoneyStatCard({
+                    label: "Tổng tiền nhà",
+                    value: '<span id="rentTotal">0 đ</span>',
+                    tone: "warning",
+                  })}
+                  ${renderMoneyStatCard({
+                    label: "Tiền nước",
+                    value: '<span id="waterCostCard">0 đ</span>',
+                    tone: "neutral",
+                  })}
+                  ${renderMoneyStatCard({
+                    label: "Tiền điện",
+                    value: '<span id="elecCostCard">0 đ</span>',
+                    tone: "neutral",
+                  })}
+                </div>
+              </div>
+
+              <div class="col-12">
+                <label class="form-label">Ghi chú</label>
+                <input id="rentNote" class="form-control" placeholder="VD: Tiền nhà tháng này" />
               </div>
             </div>
           </div>
+        </section>
+
+        <section class="card section-card" id="rentShareCard">
+          <div class="card-body section-card__body">
+            ${renderSectionHeader({
+              title: "2. Chia tiền",
+              subtitle: "Chọn chia đều hoặc tự nhập phần của từng người.",
+              action: `
+                <div class="form-check">
+                  <input class="form-check-input" type="checkbox" id="splitEqual" checked>
+                  <label class="form-check-label" for="splitEqual">Chia đều</label>
+                </div>
+              `,
+            })}
+            <div id="sharesBox" class="row g-2"></div>
+            <div class="money-grid money-grid--3">
+              ${renderMoneyStatCard({
+                label: "Tổng phần chia",
+                value: '<span id="sharesSum">0 đ</span>',
+                tone: "neutral",
+              })}
+            </div>
+            <div class="small text-danger" id="sharesErr" style="min-height:18px;"></div>
+          </div>
+        </section>
+
+        <section class="card section-card" id="rentPaidCard">
+          <div class="card-body section-card__body">
+            ${renderSectionHeader({
+              title: `3. Mọi người đã chuyển cho ${nameOf(payerId)} bao nhiêu`,
+              subtitle: "Theo dõi số đã thu và phần còn thiếu của từng người.",
+            })}
+            <div id="paidBox" class="row g-2"></div>
+            <div class="money-grid money-grid--3">
+              ${renderMoneyStatCard({
+                label: "Đã thu từ mọi người",
+                value: '<span id="collected">0 đ</span>',
+                tone: "positive",
+              })}
+              ${renderMoneyStatCard({
+                label: `${nameOf(payerId)} đang gánh`,
+                value: '<span id="payerBurden">0 đ</span>',
+                tone: "warning",
+              })}
+              ${renderMoneyStatCard({
+                label: "Còn thiếu",
+                value: '<span id="totalDue">0 đ</span>',
+                tone: "danger",
+              })}
+            </div>
+            <div class="small text-secondary">Cập nhật cuối: <b id="rentUpdated">Chưa có</b></div>
+            <div class="small text-danger" id="rentMsg"></div>
+          </div>
+        </section>
+
+        <div class="mobile-action-bar" id="rentActionBar">
+          <button id="btnSaveRent" type="button" class="btn btn-primary">Lưu</button>
+          <button id="btnClearPaid" type="button" class="btn btn-outline-secondary">Clear đã chuyển</button>
         </div>
       </div>
-    </div>
-  `;
+    `,
+  });
 
   mountPrimaryNav({
     active: "rent",
@@ -229,15 +261,14 @@ export async function renderRentPage() {
     onLogout: async () => {
       await logout();
     },
+    userLabel: currentUserLabel,
   });
 
   const page = app.querySelector('[data-page="rent"]');
-  const periodEl = byId("rentPeriod");
-  let period = currentPeriod();
+  const periodPicker = byId("globalPeriodPicker");
+  let period = initialPeriod;
   let liveDoc = null;
   let prefilledPeriod = null;
-
-  periodEl.value = period;
 
   function setEditable(enabled) {
     page
@@ -246,11 +277,17 @@ export async function renderRentPage() {
         element.disabled = !enabled;
       });
 
-    periodEl.disabled = false;
+    if (periodPicker) {
+      periodPicker.disabled = false;
+      periodPicker.value = period;
+    }
 
     if (!enabled) {
-      byId("rentMsg").textContent = "Chỉ admin mới được sửa tiền nhà.";
+      byId("rentMsg").textContent = "Chỉ người vận hành tháng mới được sửa tiền nhà.";
+      return;
     }
+
+    byId("rentMsg").textContent = "";
   }
 
   function readItems() {
@@ -295,9 +332,12 @@ export async function renderRentPage() {
 
   function updateComputedText(computed) {
     byId("waterCostTxt").textContent = formatVND(computed.waterCost);
+    byId("waterCostCard").textContent = formatVND(computed.waterCost);
     byId("kwhUsedTxt").textContent = String(computed.kwhUsed);
     byId("elecCostTxt").textContent = formatVND(computed.electricCost);
+    byId("elecCostCard").textContent = formatVND(computed.electricCost);
     byId("rentTotal").textContent = formatVND(computed.total);
+    byId("rentTotalStrip").textContent = formatVND(computed.total);
   }
 
   function updateRentMetaUi(docData) {
@@ -431,8 +471,10 @@ export async function renderRentPage() {
       ? `Tổng phần chia (${formatVND(sumValues(finalShares))}) phải bằng Tổng tiền (${formatVND(total)}).`
       : "";
     byId("collected").textContent = formatVND(collected);
+    byId("collectedStrip").textContent = formatVND(collected);
     byId("payerBurden").textContent = formatVND(payerBurden);
     byId("totalDue").textContent = formatVND(totalDue);
+    byId("totalDueStrip").textContent = formatVND(totalDue);
 
     if (rerenderPaid) {
       renderPaidInputs(finalShares, paid);
@@ -655,14 +697,21 @@ export async function renderRentPage() {
     });
   });
 
-  periodEl.addEventListener("change", async (event) => {
-    period = event.target.value || currentPeriod();
-    prefilledPeriod = null;
-    await prefillIfMissing(period);
-    startWatch();
+  periodPicker?.addEventListener("change", (event) => {
+    setSelectedPeriod(event.target.value);
   });
 
   startWatch();
+
+  const unsubscribeSelectedPeriod = subscribeSelectedPeriod((nextPeriod) => {
+    if (nextPeriod === period) return;
+    period = nextPeriod;
+    prefilledPeriod = null;
+    if (periodPicker && periodPicker.value !== nextPeriod) {
+      periodPicker.value = nextPeriod;
+    }
+    startWatch();
+  });
 
   const onHashChange = () => {
     if (!location.hash.startsWith("#/rent")) {
@@ -670,6 +719,7 @@ export async function renderRentPage() {
         unsubscribeRent();
         unsubscribeRent = null;
       }
+      unsubscribeSelectedPeriod();
       window.removeEventListener("hashchange", onHashChange);
     }
   };

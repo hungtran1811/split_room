@@ -1,5 +1,10 @@
 import { logout } from "../../services/auth.service";
-import { state } from "../../core/state";
+import {
+  getSelectedPeriod,
+  setSelectedPeriod,
+  state,
+  subscribeSelectedPeriod,
+} from "../../core/state";
 import { ROSTER, nameOf } from "../../config/roster";
 import { getCurrentUserLabel, getUserLabel } from "../../core/display-name";
 import { formatVND } from "../../config/i18n";
@@ -16,21 +21,17 @@ import {
   updatePayment,
 } from "../../services/payment.service";
 import { openConfirmModal } from "../components/confirmModal";
+import { openPaymentEditModal } from "../components/paymentEditModal";
 import { renderMatrixTable } from "../components/matrixTable";
 import { openPaymentModal } from "../components/paymentModal";
 import { showToast } from "../components/toast";
+import { renderAppShell } from "../layout/app-shell";
 import { mountPrimaryNav } from "../layout/navbar";
-
-function byId(id) {
-  return document.getElementById(id);
-}
-
-function currentPeriod() {
-  const date = new Date();
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  return `${year}-${month}`;
-}
+import {
+  renderFilterPill,
+} from "../components/filterBar";
+import { renderMoneyStatCard } from "../components/moneyStatCard";
+import { renderSectionHeader } from "../components/sectionHeader";
 
 function periodToYmd(period) {
   return `${period}-01`;
@@ -59,10 +60,53 @@ function sortPayments(payments) {
   });
 }
 
-function renderBalancesList(balances) {
+function renderSummaryCards(summary) {
   return `
-    <ul class="list-group list-group-flush">
-      ${Object.entries(balances)
+    <section class="money-grid money-grid--4">
+      ${renderMoneyStatCard({
+        label: "Khoản chi",
+        value: `${summary.expenseCount}`,
+        hint: "Bản ghi chi tiêu trong tháng",
+        tone: "neutral",
+      })}
+      ${renderMoneyStatCard({
+        label: "Thanh toán",
+        value: `${summary.paymentCount}`,
+        hint: "Đã ghi nhận",
+        tone: summary.paymentCount ? "positive" : "neutral",
+      })}
+      ${renderMoneyStatCard({
+        label: "Còn cấn trừ",
+        value: `${summary.settlementCount}`,
+        hint: summary.settlementCount ? "Dòng cần xử lý" : "Đã cân bằng",
+        tone: summary.settlementCount ? "danger" : "positive",
+      })}
+      ${renderMoneyStatCard({
+        label: "Tổng payment tháng",
+        value: formatVND(summary.paymentTotal),
+        hint: "Từ lịch sử thanh toán",
+        tone: summary.paymentTotal ? "warning" : "neutral",
+      })}
+    </section>
+  `;
+}
+
+function renderBalancesList(balances) {
+  const items = Object.entries(balances || {});
+  if (!items.length) {
+    return `
+      <div class="empty-state">
+        <div class="empty-state__title">Chưa có số dư</div>
+        <div class="empty-state__text">
+          Tháng này chưa phát sinh chi tiêu hoặc thanh toán.
+        </div>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="stack-list">
+      ${items
         .map(([memberId, balance]) => {
           const absolute = Math.abs(Number(balance || 0));
           const label =
@@ -73,51 +117,66 @@ function renderBalancesList(balances) {
                 : "Cân bằng";
 
           return `
-            <li class="list-group-item d-flex justify-content-between align-items-center">
-              <span>${nameOf(memberId)}</span>
-              <span class="fw-semibold">${label}: ${formatVND(absolute)}</span>
-            </li>
+            <div class="action-list__item">
+              <div class="action-list__head">
+                <div>
+                  <div class="action-list__title">${nameOf(memberId)}</div>
+                  <div class="action-list__meta">${label}</div>
+                </div>
+                <div class="fw-semibold">${formatVND(absolute)}</div>
+              </div>
+            </div>
           `;
         })
         .join("")}
-    </ul>
+    </div>
   `;
 }
 
 function renderSettlementList(items, canOperateMonth) {
   if (!items.length) {
     return `
-      <div class="text-secondary small">
-        Không còn khoản nợ nào cần thanh toán theo cấn trừ trong tháng này.
+      <div class="empty-state">
+        <div class="empty-state__title">Không còn khoản nào cần thanh toán</div>
+        <div class="empty-state__text">
+          Cấn trừ của tháng này đã cân bằng hoặc chưa phát sinh nợ.
+        </div>
       </div>
     `;
   }
 
   return `
-    <div class="list-group list-group-flush">
+    <div class="stack-list">
       ${items
         .map(
           (item) => `
-            <div class="list-group-item d-flex justify-content-between align-items-center gap-3">
-              <div>
-                <div class="fw-semibold">${nameOf(item.fromId)} → ${nameOf(item.toId)}</div>
-                <div class="small text-secondary">Còn nợ ${formatVND(item.amount)}</div>
+            <article class="money-card money-card--danger money-card--lg">
+              <div class="action-list__head">
+                <div>
+                  <div class="money-card__label">Cần thanh toán theo cấn trừ</div>
+                  <div class="action-list__title">${nameOf(item.fromId)} -> ${nameOf(item.toId)}</div>
+                </div>
+                <div class="money-card__value">${formatVND(item.amount)}</div>
               </div>
               ${
                 canOperateMonth
                   ? `
-                    <div class="d-flex gap-2">
-                      <button class="btn btn-outline-success btn-sm" data-pay-full="${item.fromId}|${item.toId}|${item.amount}">
+                    <div class="d-flex flex-wrap gap-2 mt-3">
+                      <button class="btn ui-action-pill ui-action-pill--primary section-cta" data-pay-full="${item.fromId}|${item.toId}|${item.amount}">
                         Trả đủ
                       </button>
-                      <button class="btn btn-outline-primary btn-sm" data-pay-part="${item.fromId}|${item.toId}|${item.amount}">
+                      <button class="btn ui-action-pill ui-action-pill--secondary section-cta" data-pay-part="${item.fromId}|${item.toId}|${item.amount}">
                         Trả một phần
                       </button>
                     </div>
                   `
-                  : '<div class="small text-secondary">Chỉ người vận hành tháng mới ghi nhận được thanh toán.</div>'
+                  : `
+                    <div class="money-card__hint mt-2">
+                      Chỉ người vận hành tháng mới ghi nhận được thanh toán từ dòng cấn trừ.
+                    </div>
+                  `
               }
-            </div>
+            </article>
           `,
         )
         .join("")}
@@ -125,75 +184,39 @@ function renderSettlementList(items, canOperateMonth) {
   `;
 }
 
-function renderEditCard(payment, saving, errorMessage) {
-  if (!payment) return "";
-
-  return `
-    <div class="card mb-3">
-      <div class="card-header">Sửa thanh toán đã ghi nhận</div>
-      <div class="card-body">
-        <div class="row g-3">
-          <div class="col-12 col-md-4">
-            <label class="form-label">Ngày</label>
-            <input id="editPaymentDate" type="date" class="form-control" value="${payment.date || ""}" />
-          </div>
-          <div class="col-12 col-md-8">
-            <label class="form-label">Ghi chú</label>
-            <input
-              id="editPaymentNote"
-              class="form-control"
-              value="${payment.note || ""}"
-              placeholder="VD: Trả một phần theo cấn trừ"
-            />
-          </div>
-          <div class="col-12">
-            <div class="small text-secondary">
-              Bản ghi này chỉ cho sửa ngày và ghi chú.
-              Nếu số tiền sai, hãy xóa rồi ghi nhận lại từ dòng cấn trừ tương ứng.
-            </div>
-          </div>
-          <div class="col-12 d-flex gap-2 align-items-center">
-            <button id="btnSavePaymentEdit" class="btn btn-primary" ${saving ? "disabled" : ""}>
-              ${saving ? "Đang lưu..." : "Cập nhật thanh toán"}
-            </button>
-            <button id="btnCancelPaymentEdit" class="btn btn-outline-secondary" ${saving ? "disabled" : ""}>
-              Hủy
-            </button>
-            <div id="paymentsMsg" class="small text-danger">${errorMessage || ""}</div>
-          </div>
-        </div>
-      </div>
-    </div>
-  `;
-}
-
 function renderPaymentsHistory(payments, canOperate) {
   if (!payments.length) {
-    return '<div class="text-secondary">Chưa có thanh toán nào trong tháng này.</div>';
+    return `
+      <div class="empty-state">
+        <div class="empty-state__title">Chưa có thanh toán nào</div>
+        <div class="empty-state__text">
+          Lịch sử thanh toán của tháng này sẽ xuất hiện ở đây.
+        </div>
+      </div>
+    `;
   }
 
   return `
-    <div class="list-group">
+    <div class="stack-list">
       ${sortPayments(payments)
         .map(
           (payment) => `
-            <div class="list-group-item">
-              <div class="d-flex justify-content-between align-items-start gap-3">
+            <article class="action-list__item">
+              <div class="action-list__head">
                 <div>
-                  <div class="fw-semibold">
-                    ${payment.date} • ${nameOf(payment.fromId)} → ${nameOf(payment.toId)} • ${formatVND(payment.amount)}
-                  </div>
-                  <div class="text-secondary small">${payment.note || "Không có ghi chú"}</div>
-                  <div class="text-secondary small">Người tạo: <b>${creatorLabel(payment.createdBy)}</b></div>
+                  <div class="action-list__title">${payment.date} • ${nameOf(payment.fromId)} -> ${nameOf(payment.toId)}</div>
+                  <div class="action-list__meta">${formatVND(payment.amount)}</div>
+                  <div class="action-list__meta">${payment.note || "Không có ghi chú"}</div>
+                  <div class="action-list__meta">Người tạo: ${creatorLabel(payment.createdBy)}</div>
                 </div>
                 ${
                   canOperate
                     ? `
-                      <div class="d-flex gap-2">
-                        <button class="btn btn-outline-secondary btn-sm" data-edit-payment="${payment.id}">
-                          Sửa
+                      <div class="d-flex flex-wrap gap-2">
+                        <button class="btn ui-action-pill ui-action-pill--secondary section-cta" data-edit-payment="${payment.id}">
+                          Sửa ngày / ghi chú
                         </button>
-                        <button class="btn btn-outline-danger btn-sm" data-delete-payment="${payment.id}">
+                        <button class="btn ui-action-pill ui-action-pill--danger section-cta" data-delete-payment="${payment.id}">
                           Xóa
                         </button>
                       </div>
@@ -201,10 +224,24 @@ function renderPaymentsHistory(payments, canOperate) {
                     : ""
                 }
               </div>
-            </div>
+            </article>
           `,
         )
         .join("")}
+    </div>
+  `;
+}
+
+function renderLoading(period) {
+  return `
+    <div class="card">
+      <div class="card-body d-flex align-items-center gap-3">
+        <div class="spinner-border" role="status" aria-label="Loading"></div>
+        <div>
+          <div class="fw-semibold">Đang tải dữ liệu thanh toán tháng ${period}...</div>
+          <div class="text-secondary small">Vui lòng chờ trong giây lát</div>
+        </div>
+      </div>
     </div>
   `;
 }
@@ -218,21 +255,15 @@ export async function renderPaymentsPage(options = {}) {
   const openVerification = options.openVerification === true;
   const aliasMode = options.aliasMode === true;
   const payLocks = new Set();
+  const currentUserLabel = getCurrentUserLabel(state);
 
-  let selectedPeriod = currentPeriod();
+  let selectedPeriod = getSelectedPeriod();
   let liveExpenses = [];
   let livePayments = [];
   let expensesReady = false;
   let paymentsReady = false;
-  let editingPaymentId = null;
-  let savingEdit = false;
-  let editError = "";
   let unsubscribeExpenses = null;
   let unsubscribePayments = null;
-
-  function activeEditingPayment() {
-    return livePayments.find((item) => item.id === editingPaymentId) || null;
-  }
 
   function paymentSummary(settlement) {
     return {
@@ -254,148 +285,110 @@ export async function renderPaymentsPage(options = {}) {
       payments: livePayments,
     });
     const summary = paymentSummary(settlement);
-    const editingPayment = activeEditingPayment();
 
-    if (editingPaymentId && !editingPayment) {
-      editingPaymentId = null;
-      editError = "";
-    }
-
-    app.innerHTML = `
-      <div class="app-shell" data-page="payments">
-        <div class="app-shell__container">
-          <div class="app-shell__header">
-            <div class="app-shell__title-block">
-              <h1 class="app-shell__title">Thanh toán</h1>
-              <div class="app-shell__meta">Đăng nhập: ${getCurrentUserLabel(state)}</div>
-              <div class="app-shell__meta">Nhóm: <b>${groupId}</b></div>
-            </div>
-            <div id="primaryNavHost" class="app-shell__nav-host"></div>
-          </div>
-
+    app.innerHTML = renderAppShell({
+      pageId: "payments",
+      title: "Thanh toán",
+      subtitle: "Vận hành theo cấn trừ",
+      meta: [`Đăng nhập: ${currentUserLabel}`, `Nhóm: ${groupId}`],
+      showPeriodFilter: true,
+      period: selectedPeriod,
+      periodActions: [
+        renderFilterPill({
+          label: `${summary.expenseCount} khoản chi`,
+          tone: "neutral",
+        }),
+        renderFilterPill({
+          label: `${summary.paymentCount} payment`,
+          tone: summary.paymentCount ? "success" : "warning",
+        }),
+      ].join(""),
+      content: `
         ${
           aliasMode
             ? `
-              <div class="alert alert-info mb-3">
-                Phần Cấn trừ đã được gộp vào Thanh toán. Đây là chế độ xem tương thích từ liên kết cũ <code>#/matrix</code>.
+              <div class="info-banner">
+                <span class="fw-semibold">Phần đối chiếu cấn trừ đã được gộp vào Thanh toán.</span>
+                <span>Liên kết cũ <code>#/matrix</code> hiện mở thẳng phần đối chiếu ở đây.</span>
               </div>
             `
             : ""
         }
 
-        <div class="row g-2 align-items-end mb-3">
-          <div class="col-6 col-md-4">
-            <label class="form-label small mb-1">Chọn tháng</label>
-            <input id="paymentsPeriod" type="month" class="form-control" value="${selectedPeriod}" />
-          </div>
-        </div>
-
         ${
           ready
             ? `
-              <div class="row g-2 mb-3">
-                <div class="col-6 col-lg-3">
-                  <div class="card h-100">
-                    <div class="card-body">
-                      <div class="text-secondary small">Khoản chi</div>
-                      <div class="fw-semibold fs-5">${summary.expenseCount}</div>
-                    </div>
-                  </div>
-                </div>
-                <div class="col-6 col-lg-3">
-                  <div class="card h-100">
-                    <div class="card-body">
-                      <div class="text-secondary small">Thanh toán</div>
-                      <div class="fw-semibold fs-5">${summary.paymentCount}</div>
-                    </div>
-                  </div>
-                </div>
-                <div class="col-6 col-lg-3">
-                  <div class="card h-100">
-                    <div class="card-body">
-                      <div class="text-secondary small">Dòng cấn trừ còn lại</div>
-                      <div class="fw-semibold fs-5">${summary.settlementCount}</div>
-                    </div>
-                  </div>
-                </div>
-                <div class="col-6 col-lg-3">
-                  <div class="card h-100">
-                    <div class="card-body">
-                      <div class="text-secondary small">Tổng payment tháng</div>
-                      <div class="fw-semibold fs-5">${formatVND(summary.paymentTotal)}</div>
-                    </div>
-                  </div>
-                </div>
-              </div>
+              ${renderSummaryCards(summary)}
 
-              ${canOperate ? renderEditCard(editingPayment, savingEdit, editError) : ""}
-
-              <div class="card mb-3">
-                <div class="card-header">Các khoản cần thanh toán theo cấn trừ</div>
-                <div class="card-body">
-                  <div class="small text-secondary mb-3">
-                    Thanh toán mới chỉ được ghi nhận từ các dòng cấn trừ hiện tại. Trả một phần không được vượt quá số còn nợ.
-                  </div>
+              <section class="card section-card">
+                <div class="card-body section-card__body">
+                  ${renderSectionHeader({
+                    title: "Các khoản cần thanh toán theo cấn trừ",
+                    subtitle:
+                      "Mọi payment mới chỉ được ghi nhận từ các dòng cấn trừ còn lại của tháng này.",
+                  })}
                   ${renderSettlementList(settlement.settlementPlan, canOperate)}
                 </div>
-              </div>
+              </section>
 
-              <div class="card mb-3">
-                <div class="card-header">Lịch sử thanh toán trong tháng</div>
-                <div class="card-body">
+              <section class="card section-card">
+                <div class="card-body section-card__body">
+                  ${renderSectionHeader({
+                    title: "Lịch sử thanh toán tháng",
+                    subtitle:
+                      "Chỉ được sửa ngày và ghi chú. Nếu sai số tiền, hãy xóa rồi tạo lại từ dòng cấn trừ.",
+                  })}
                   ${renderPaymentsHistory(livePayments, canOperate)}
                 </div>
-              </div>
+              </section>
 
-              <details class="card" id="paymentsVerification" ${openVerification ? "open" : ""}>
-                <summary class="card-header small text-secondary">
-                  Xem ma trận đối chiếu
-                </summary>
-                <div class="card-body">
-                  <div class="card mb-3">
-                    <div class="card-header">1) Ma trận nợ gốc</div>
-                    <div class="card-body">
+              <details class="card section-card" id="paymentsVerification" ${openVerification ? "open" : ""}>
+                <summary class="card-header">Xem ma trận đối chiếu</summary>
+                <div class="card-body section-card__body">
+                  <section class="card">
+                    <div class="card-body section-card__body">
+                      ${renderSectionHeader({
+                        title: "Ma trận nợ gốc",
+                        subtitle: "Bảng nợ ban đầu tạo từ các khoản chi tiêu.",
+                      })}
                       ${renderMatrixTable({
                         members: ROSTER,
                         matrix: settlement.grossMatrix,
-                        title: "Ma trận nợ gốc (từ chi tiêu)",
+                        title: "Ma trận nợ gốc từ chi tiêu",
                       })}
                     </div>
-                  </div>
+                  </section>
 
-                  <div class="card mb-3">
-                    <div class="card-header">2) Số dư sau khi áp payment</div>
-                    <div class="card-body">
+                  <section class="card">
+                    <div class="card-body section-card__body">
+                      ${renderSectionHeader({
+                        title: "Số dư sau khi áp payment",
+                        subtitle: "Số dư hiện tại sau khi đã trừ các payment đã ghi nhận.",
+                      })}
                       ${renderBalancesList(settlement.balances)}
                     </div>
-                  </div>
+                  </section>
 
-                  <div class="card">
-                    <div class="card-header">3) Ma trận sau cấn trừ</div>
-                    <div class="card-body">
+                  <section class="card">
+                    <div class="card-body section-card__body">
+                      ${renderSectionHeader({
+                        title: "Ma trận sau cấn trừ",
+                        subtitle: "Bảng đối chiếu để mọi người kiểm tra lại logic thanh toán.",
+                      })}
                       ${renderMatrixTable({
                         members: ROSTER,
                         matrix: settlement.settleMatrix,
                         title: "Ma trận sau cấn trừ",
                       })}
                     </div>
-                  </div>
+                  </section>
                 </div>
               </details>
             `
-            : `
-              <div class="d-flex align-items-center gap-3 py-4">
-                <div class="spinner-border" role="status" aria-label="Loading"></div>
-                <div>
-                  <div class="fw-semibold">Đang tải dữ liệu thanh toán tháng ${selectedPeriod}...</div>
-                  <div class="text-secondary small">Vui lòng chờ trong giây lát</div>
-                </div>
-              </div>
-            `
+            : renderLoading(selectedPeriod)
         }
-        </div>
-      </div>
-    `;
+      `,
+    });
 
     mountPrimaryNav({
       active: "payments",
@@ -404,66 +397,17 @@ export async function renderPaymentsPage(options = {}) {
       onLogout: async () => {
         await logout();
       },
+      userLabel: currentUserLabel,
     });
 
-    byId("paymentsPeriod")?.addEventListener("change", (event) => {
-      selectedPeriod = event.target.value || currentPeriod();
-      editingPaymentId = null;
-      editError = "";
-      startWatch();
-      render();
+    document.getElementById("globalPeriodPicker")?.addEventListener("change", (event) => {
+      setSelectedPeriod(event.target.value);
     });
 
     if (!ready) return;
 
     bindSettlementButtons(settlement.settlementPlan);
     bindHistoryActions();
-    bindEditActions(editingPayment);
-  }
-
-  function bindEditActions(editingPayment) {
-    if (!canOperate || !editingPayment) return;
-
-    byId("btnSavePaymentEdit")?.addEventListener("click", async () => {
-      if (savingEdit) return;
-
-      const date = byId("editPaymentDate")?.value || editingPayment.date || "";
-      const note = byId("editPaymentNote")?.value?.trim() || "";
-      if (!date) {
-        editError = "Ngày thanh toán không được để trống.";
-        render();
-        return;
-      }
-
-      savingEdit = true;
-      editError = "";
-      render();
-
-      try {
-        await updatePayment(groupId, editingPayment.id, {
-          date,
-          note,
-        });
-        savingEdit = false;
-        editingPaymentId = null;
-        showToast({
-          title: "Thành công",
-          message: "Đã cập nhật ngày và ghi chú thanh toán.",
-          variant: "success",
-        });
-      } catch (error) {
-        savingEdit = false;
-        editError = mapFirestoreError(error, "Không thể cập nhật thanh toán.");
-      } finally {
-        render();
-      }
-    });
-
-    byId("btnCancelPaymentEdit")?.addEventListener("click", () => {
-      editingPaymentId = null;
-      editError = "";
-      render();
-    });
   }
 
   function bindHistoryActions() {
@@ -471,10 +415,29 @@ export async function renderPaymentsPage(options = {}) {
 
     app.querySelectorAll("[data-edit-payment]").forEach((button) => {
       button.addEventListener("click", () => {
-        editingPaymentId = button.getAttribute("data-edit-payment");
-        editError = "";
-        render();
-        window.scrollTo({ top: 0, behavior: "smooth" });
+        const payment = livePayments.find(
+          (item) => item.id === button.getAttribute("data-edit-payment"),
+        );
+        if (!payment) return;
+
+        openPaymentEditModal({
+          date: payment.date || "",
+          note: payment.note || "",
+          onSubmit: async ({ date, note }) => {
+            try {
+              await updatePayment(groupId, payment.id, { date, note });
+              showToast({
+                title: "Thành công",
+                message: "Đã cập nhật ngày và ghi chú thanh toán.",
+                variant: "success",
+              });
+            } catch (error) {
+              throw new Error(
+                mapFirestoreError(error, "Không thể cập nhật thanh toán."),
+              );
+            }
+          },
+        });
       });
     });
 
@@ -488,16 +451,12 @@ export async function renderPaymentsPage(options = {}) {
         openConfirmModal({
           title: "Xóa thanh toán",
           message: "Bạn chắc chắn muốn xóa thanh toán này?",
-          meta: `${payment.date} • ${nameOf(payment.fromId)} → ${nameOf(payment.toId)} • ${formatVND(payment.amount)}`,
+          meta: `${payment.date} • ${nameOf(payment.fromId)} -> ${nameOf(payment.toId)} • ${formatVND(payment.amount)}`,
           okText: "Xóa",
           danger: true,
           onConfirm: async () => {
             try {
               await removePayment(groupId, payment.id);
-              if (editingPaymentId === payment.id) {
-                editingPaymentId = null;
-                editError = "";
-              }
               showToast({
                 title: "Thành công",
                 message: "Đã xóa thanh toán.",
@@ -645,12 +604,20 @@ export async function renderPaymentsPage(options = {}) {
   render();
   startWatch();
 
+  const unsubscribeSelectedPeriod = subscribeSelectedPeriod((nextPeriod) => {
+    if (nextPeriod === selectedPeriod) return;
+    selectedPeriod = nextPeriod;
+    render();
+    startWatch();
+  });
+
   const onHashChange = () => {
     const isPaymentsRoute = location.hash.startsWith("#/payments");
     const isMatrixRoute = aliasMode && location.hash.startsWith("#/matrix");
     if (!isPaymentsRoute && !isMatrixRoute) {
       unsubscribeExpenses?.();
       unsubscribePayments?.();
+      unsubscribeSelectedPeriod();
       window.removeEventListener("hashchange", onHashChange);
     }
   };
