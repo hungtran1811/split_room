@@ -99,6 +99,7 @@
 .page-filter {
   display: grid;
   gap: 12px;
+  margin-bottom: 18px;
   padding: 14px;
   border: 1px solid rgba(216, 224, 235, 0.92);
   border-radius: 18px;
@@ -120,6 +121,13 @@
 
 .page-filter__field {
   min-width: 0;
+}
+
+.page-filter__hint {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  line-height: 1.35;
 }
 
 .filter-pill {
@@ -376,16 +384,19 @@
 
 .expense-day-group {
   display: grid;
-  gap: 12px;
+  gap: 14px;
 }
 
 .expense-day-group + .expense-day-group {
-  padding-top: 12px;
+  margin-top: 4px;
+  padding-top: 18px;
   border-top: 1px solid var(--border);
 }
 
 .expense-day-group__header {
   margin-bottom: 0;
+  padding: 0 4px 8px;
+  border-bottom: 1px solid rgba(216, 224, 235, 0.72);
 }
 
 .expense-day-group__header .section-header__title {
@@ -398,7 +409,7 @@
 
 .expense-day-group__list {
   display: grid;
-  gap: 10px;
+  gap: 12px;
 }
 
 .action-list__item {
@@ -438,6 +449,38 @@ button.action-list__item {
   margin-top: 4px;
   color: var(--muted);
   font-size: var(--text-sm);
+}
+
+.settlement-explain {
+  gap: 0;
+}
+
+.settlement-explain__summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.settlement-explain__summary::-webkit-details-marker {
+  display: none;
+}
+
+.settlement-explain__side {
+  text-align: right;
+}
+
+.settlement-explain__body {
+  display: grid;
+  gap: 12px;
+  padding-top: 14px;
+}
+
+.settlement-explain__line {
+  padding: 12px 14px;
+  background: #fbfdff;
 }
 
 .chip-toggle {
@@ -811,6 +854,34 @@ button.profile-menu__item {
   gap: 14px;
 }
 
+.section-toggle > summary {
+  list-style: none;
+  cursor: pointer;
+}
+
+.section-toggle > summary::-webkit-details-marker {
+  display: none;
+}
+
+.section-toggle__summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+}
+
+.section-toggle__title {
+  font-size: var(--text-lg);
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.section-toggle__subtitle {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+
 .status-grid {
   display: grid;
   gap: 12px;
@@ -841,8 +912,14 @@ button.profile-menu__item {
   font-size: var(--text-sm);
 }
 
+.verification-period-field {
+  max-width: 240px;
+  margin-bottom: 18px;
+}
+
 @media (min-width: 768px) {
   .page-filter {
+    margin-bottom: 20px;
     padding: 16px;
   }
 
@@ -879,6 +956,7 @@ button.profile-menu__item {
     grid-template-columns: minmax(0, 1fr) auto;
     align-items: end;
     gap: 18px;
+    margin-bottom: 22px;
   }
 
   .page-filter__main {

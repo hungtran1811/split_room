@@ -21,16 +21,11 @@ import {
   updateExpense,
 } from "../../services/expense.service";
 import { watchMonthExpenses } from "../../services/month-ops.service";
-import { renderFilterPill } from "../components/filterBar";
 import { renderMoneyStatCard } from "../components/moneyStatCard";
 import { renderSectionHeader } from "../components/sectionHeader";
 
 function byId(id) {
   return document.getElementById(id);
-}
-
-function periodToYmd(period) {
-  return `${period}-01`;
 }
 
 function todayYmd() {
@@ -39,6 +34,17 @@ function todayYmd() {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+function expenseDateForPeriod(period) {
+  const today = new Date();
+  const [year, month] = String(period || "").split("-").map(Number);
+  if (!year || !month) return todayYmd();
+
+  const currentDay = today.getDate();
+  const lastDay = new Date(year, month, 0).getDate();
+  const day = String(Math.min(currentDay, lastDay)).padStart(2, "0");
+  return `${year}-${String(month).padStart(2, "0")}-${day}`;
 }
 
 function creatorLabel(uid) {
@@ -91,6 +97,7 @@ export async function renderExpensesPage() {
   const composerOpenByDefault = window.matchMedia("(min-width: 992px)").matches;
   const currentUserLabel = getCurrentUserLabel(state);
   let selectedPeriod = getSelectedPeriod();
+  let expenseListOpen = false;
   let unsubscribeExpenses = null;
   let liveExpenses = [];
 
@@ -166,7 +173,7 @@ export async function renderExpensesPage() {
   }
 
   function resetForm() {
-    byId("exDate").value = periodToYmd(selectedPeriod);
+    byId("exDate").value = expenseDateForPeriod(selectedPeriod);
     byId("exAmount").value = "";
     byId("exNote").value = "";
     document.querySelectorAll(".exPart").forEach((checkbox) => {
@@ -178,7 +185,7 @@ export async function renderExpensesPage() {
   }
 
   async function saveExpense() {
-    const date = byId("exDate").value || periodToYmd(selectedPeriod);
+    const date = byId("exDate").value || expenseDateForPeriod(selectedPeriod);
     const amount = parseVndInput(byId("exAmount").value);
     const payerId = byId("exPayer").value;
     const note = byId("exNote").value.trim();
@@ -375,13 +382,8 @@ export async function renderExpensesPage() {
       meta: [`Đăng nhập: ${currentUserLabel}`, `Nhóm: ${groupId}`],
       showPeriodFilter: true,
       period: selectedPeriod,
-      periodActions: [
-        renderFilterPill({
-          label: `${liveExpenses.length} khoản`,
-          tone: liveExpenses.length ? "neutral" : "warning",
-        }),
+      periodActions:
         '<button id="btnOpenComposer" class="btn ui-action-pill ui-action-pill--primary" type="button">Thêm khoản chi</button>',
-      ].join(""),
       content: `
         <div id="expensesSummary">
           ${renderExpenseSummary(liveExpenses)}
@@ -393,7 +395,7 @@ export async function renderExpensesPage() {
             <div class="row g-3">
               <div class="col-md-4">
                 <label class="form-label">Ngày</label>
-                <input id="exDate" type="date" class="form-control" value="${todayYmd()}"/>
+                <input id="exDate" type="date" class="form-control" value="${expenseDateForPeriod(selectedPeriod)}"/>
               </div>
 
               <div class="col-md-4">
@@ -481,16 +483,18 @@ export async function renderExpensesPage() {
           </div>
         </details>
 
-        <section class="card section-card">
+        <details class="card section-card section-toggle" id="expensesHistory" ${expenseListOpen ? "open" : ""}>
+          <summary class="card-header section-toggle__summary">
+            <div>
+              <div class="section-toggle__title">Danh sách chi tiêu</div>
+              <div class="section-toggle__subtitle">Ẩn mặc định, mở ra khi cần xem lịch sử của tháng đang chọn.</div>
+            </div>
+            <span class="filter-pill filter-pill--neutral" id="expensesCount">${liveExpenses.length} khoản</span>
+          </summary>
           <div class="card-body section-card__body">
-            ${renderSectionHeader({
-              title: "Danh sách chi tiêu",
-              subtitle: "Lịch sử các khoản chi của tháng đang xem.",
-              action: `<span class="filter-pill filter-pill--neutral" id="expensesCount">${liveExpenses.length} khoản</span>`,
-            })}
             <div id="expensesList"></div>
           </div>
-        </section>
+        </details>
       `,
     });
 
@@ -548,6 +552,10 @@ export async function renderExpensesPage() {
     byId("btnSaveExpense").addEventListener("click", async () => {
       await saveExpense();
     });
+
+    byId("expensesHistory")?.addEventListener("toggle", (event) => {
+      expenseListOpen = event.currentTarget.open;
+    });
   }
 
   function startWatch() {
@@ -564,7 +572,7 @@ export async function renderExpensesPage() {
   bindEvents();
   syncParticipantChips();
   renderDebtsInputs();
-  byId("exDate").value = periodToYmd(selectedPeriod);
+  byId("exDate").value = expenseDateForPeriod(selectedPeriod);
   renderExpensesList([]);
   startWatch();
 
@@ -576,7 +584,7 @@ export async function renderExpensesPage() {
     bindEvents();
     syncParticipantChips();
     renderDebtsInputs();
-    byId("exDate").value = periodToYmd(selectedPeriod);
+    byId("exDate").value = expenseDateForPeriod(selectedPeriod);
     renderExpensesList(liveExpenses);
     startWatch();
   });

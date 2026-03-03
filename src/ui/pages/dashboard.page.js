@@ -12,8 +12,14 @@ import {
   getCurrentUserLabel,
   getMemberLabelById,
 } from "../../core/display-name";
-import { watchExpensesByRange } from "../../services/expense.service";
-import { watchPaymentsByRange } from "../../services/payment.service";
+import {
+  watchExpenses,
+  watchExpensesByRange,
+} from "../../services/expense.service";
+import {
+  watchPayments,
+  watchPaymentsByRange,
+} from "../../services/payment.service";
 import { watchRentByPeriod } from "../../services/rent.service";
 import { getMonthRange } from "../../services/month-ops.service";
 import { renderAppShell } from "../layout/app-shell";
@@ -57,6 +63,22 @@ function applyPaymentsToBalances(balances, payments) {
   }
 
   return next;
+}
+
+function computeSettlementPlan(memberIds, expenses, payments) {
+  const gross = buildGrossMatrix(memberIds, expenses);
+  let balances = computeNetBalances(memberIds, gross);
+  balances = applyPaymentsToBalances(balances, payments);
+
+  for (const memberId of Object.keys(balances)) {
+    balances[memberId] = roundVnd(balances[memberId]);
+  }
+
+  return settleDebts(balances).map((item) => ({
+    fromId: item.fromId || item.from || item.debtorId,
+    toId: item.toId || item.to || item.creditorId,
+    amount: Number(item.amount || item.amt || 0),
+  }));
 }
 
 function summarizeRentForMember(rentDoc, memberId) {
@@ -287,15 +309,22 @@ function renderRentSection(rentSummary) {
   `;
 }
 
-function renderSettlementSection(items) {
+function renderSettlementSection(items, options = {}) {
+  const {
+    subtitle = "Các khoản thanh toán còn lại sau khi đã áp payment trong tháng.",
+    emptyText = "Các khoản nợ đã cân bằng ở tháng này.",
+    showOpenPaymentsCta = true,
+  } = options;
+
   return `
     <section class="card section-card">
       <div class="card-body section-card__body">
         ${renderSectionHeader({
           title: "Cấn trừ hiện tại",
-          subtitle: "Các khoản thanh toán còn lại sau khi đã áp payment trong tháng.",
-          action:
-            '<a class="btn ui-action-pill ui-action-pill--secondary section-cta" href="#/payments">Mở thanh toán</a>',
+          subtitle,
+          action: showOpenPaymentsCta
+            ? '<a class="btn ui-action-pill ui-action-pill--secondary section-cta" href="#/payments">Mở thanh toán</a>'
+            : "",
         })}
         ${
           items.length
@@ -327,12 +356,32 @@ function renderSettlementSection(items) {
             : `
               <div class="empty-state">
                 <div class="empty-state__title">Không còn cấn trừ nào</div>
-                <div class="empty-state__text">
-                  Các khoản nợ đã cân bằng ở tháng này.
-                </div>
+                <div class="empty-state__text">${emptyText}</div>
               </div>
             `
         }
+      </div>
+    </section>
+  `;
+}
+
+function renderSettlementSectionLoading() {
+  return `
+    <section class="card section-card">
+      <div class="card-body section-card__body">
+        ${renderSectionHeader({
+          title: "Cấn trừ hiện tại",
+          subtitle:
+            "Tổng các khoản còn cần thanh toán từ trước tới nay, không chỉ riêng tháng đang xem.",
+        })}
+        <div class="card">
+          <div class="card-body d-flex align-items-center gap-3">
+            <div class="spinner-border spinner-border-sm" role="status" aria-label="Loading"></div>
+            <div class="text-secondary small">
+              Đang tải cấn trừ toàn bộ lịch sử...
+            </div>
+          </div>
+        </div>
       </div>
     </section>
   `;
@@ -364,12 +413,18 @@ export function renderDashboardPage() {
   let liveExpenses = [];
   let livePayments = [];
   let liveRent = null;
+  let allTimeExpenses = [];
+  let allTimePayments = [];
   let expensesReady = false;
   let paymentsReady = false;
   let rentReady = false;
+  let allTimeExpensesReady = false;
+  let allTimePaymentsReady = false;
   let unsubscribeExpenses = null;
   let unsubscribePayments = null;
   let unsubscribeRent = null;
+  let unsubscribeAllTimeExpenses = null;
+  let unsubscribeAllTimePayments = null;
   let disposed = false;
 
   function renderShell(content, periodActions = "") {
@@ -423,20 +478,15 @@ export function renderDashboardPage() {
       (sum, item) => sum + Number(item.amount || 0),
       0,
     );
-
-    const gross = buildGrossMatrix(memberIds, liveExpenses);
-    let balances = computeNetBalances(memberIds, gross);
-    balances = applyPaymentsToBalances(balances, livePayments);
-
-    for (const memberId of Object.keys(balances)) {
-      balances[memberId] = roundVnd(balances[memberId]);
-    }
-
-    const settlementPlan = settleDebts(balances).map((item) => ({
-      fromId: item.fromId || item.from || item.debtorId,
-      toId: item.toId || item.to || item.creditorId,
-      amount: Number(item.amount || item.amt || 0),
-    }));
+    const settlementPlan = computeSettlementPlan(
+      memberIds,
+      liveExpenses,
+      livePayments,
+    );
+    const allTimeSettlementPlan =
+      allTimeExpensesReady && allTimePaymentsReady
+        ? computeSettlementPlan(memberIds, allTimeExpenses, allTimePayments)
+        : null;
 
     const rentSummary = summarizeRentForMember(liveRent, myMemberId);
     const stats = {
@@ -500,7 +550,17 @@ export function renderDashboardPage() {
         </section>
 
         ${renderRentSection(rentSummary)}
-        ${renderSettlementSection(settlementPlan)}
+        ${
+          allTimeSettlementPlan
+            ? renderSettlementSection(allTimeSettlementPlan, {
+                subtitle:
+                  "Tổng các khoản còn cần thanh toán từ trước tới nay, không chỉ riêng tháng đang xem.",
+                emptyText:
+                  "Nếu tính trên toàn bộ dữ liệu hiện có, các khoản nợ đã được cân bằng.",
+                showOpenPaymentsCta: false,
+              })
+            : renderSettlementSectionLoading()
+        }
       `,
       periodActions,
     );
@@ -511,7 +571,7 @@ export function renderDashboardPage() {
           .getAttribute("data-copy")
           .split("|");
         const amount = Number(amountString || 0);
-        const text = `${nameOf(fromId)} chuyển ${formatVND(amount)} cho ${nameOf(toId)} (tháng ${period})`;
+        const text = `${nameOf(fromId)} chuyển ${formatVND(amount)} cho ${nameOf(toId)} (cấn trừ hiện tại)`;
 
         try {
           await navigator.clipboard.writeText(text);
@@ -524,6 +584,30 @@ export function renderDashboardPage() {
           window.prompt("Copy nội dung này:", text);
         }
       });
+    });
+  }
+
+  function startAllTimeWatchers() {
+    unsubscribeAllTimeExpenses?.();
+    unsubscribeAllTimePayments?.();
+
+    allTimeExpensesReady = false;
+    allTimePaymentsReady = false;
+
+    const groupId = state.groupId;
+
+    unsubscribeAllTimeExpenses = watchExpenses(groupId, (items) => {
+      if (disposed) return;
+      allTimeExpenses = items;
+      allTimeExpensesReady = true;
+      recomputeAndRender();
+    });
+
+    unsubscribeAllTimePayments = watchPayments(groupId, (items) => {
+      if (disposed) return;
+      allTimePayments = items;
+      allTimePaymentsReady = true;
+      recomputeAndRender();
     });
   }
 
@@ -578,6 +662,8 @@ export function renderDashboardPage() {
       unsubscribeExpenses?.();
       unsubscribePayments?.();
       unsubscribeRent?.();
+      unsubscribeAllTimeExpenses?.();
+      unsubscribeAllTimePayments?.();
       unsubscribeSelectedPeriod();
       window.removeEventListener("hashchange", onHashChange);
     }
@@ -585,5 +671,6 @@ export function renderDashboardPage() {
 
   window.addEventListener("hashchange", onHashChange);
   renderLoadingShell();
+  startAllTimeWatchers();
   startWatchers();
 }
