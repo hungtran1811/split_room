@@ -48,11 +48,6 @@ function creatorLabel(uid) {
   return uid;
 }
 
-function periodFromDate(date) {
-  const value = String(date || "");
-  return /^\d{4}-\d{2}-\d{2}$/.test(value) ? value.slice(0, 7) : null;
-}
-
 function formatPeriodLabel(period) {
   const [year, month] = String(period || "").split("-");
   if (!year || !month) return period || "-";
@@ -67,61 +62,6 @@ function sortPayments(payments) {
     if (dateDiff !== 0) return dateDiff;
 
     return String(right.id || "").localeCompare(String(left.id || ""));
-  });
-}
-
-function sumAmount(items) {
-  return (items || []).reduce((sum, item) => sum + Number(item.amount || 0), 0);
-}
-
-function buildSettlementBreakdown(expenses, payments) {
-  const expenseBuckets = new Map();
-  const paymentBuckets = new Map();
-
-  for (const expense of expenses || []) {
-    const period = periodFromDate(expense.date);
-    if (!period) continue;
-    const items = expenseBuckets.get(period) || [];
-    items.push(expense);
-    expenseBuckets.set(period, items);
-  }
-
-  for (const payment of payments || []) {
-    const period = periodFromDate(payment.date);
-    if (!period) continue;
-    const items = paymentBuckets.get(period) || [];
-    items.push(payment);
-    paymentBuckets.set(period, items);
-  }
-
-  const periods = Array.from(
-    new Set([...expenseBuckets.keys(), ...paymentBuckets.keys()]),
-  ).sort();
-
-  const runningExpenses = [];
-  const runningPayments = [];
-
-  return periods.map((period) => {
-    const monthExpenses = expenseBuckets.get(period) || [];
-    const monthPayments = paymentBuckets.get(period) || [];
-
-    runningExpenses.push(...monthExpenses);
-    runningPayments.push(...monthPayments);
-
-    const runningSettlement = buildMonthlySettlementView({
-      roster: ROSTER,
-      expenses: runningExpenses,
-      payments: runningPayments,
-    });
-
-    return {
-      period,
-      expenseCount: monthExpenses.length,
-      expenseTotal: sumAmount(monthExpenses),
-      paymentCount: monthPayments.length,
-      paymentTotal: sumAmount(monthPayments),
-      settlementPlan: runningSettlement.settlementPlan,
-    };
   });
 }
 
@@ -290,74 +230,6 @@ function renderPaymentsHistory(payments, canOperate) {
                 }
               </div>
             </article>
-          `,
-        )
-        .join("")}
-    </div>
-  `;
-}
-
-function renderSettlementExplanation(items) {
-  if (!items.length) {
-    return `
-      <div class="empty-state">
-        <div class="empty-state__title">Chưa có dữ liệu để diễn giải</div>
-        <div class="empty-state__text">
-          Khi có khoản chi hoặc thanh toán, phần giải thích theo từng tháng sẽ xuất hiện ở đây.
-        </div>
-      </div>
-    `;
-  }
-
-  return `
-    <div class="stack-list settlement-explain-list">
-      ${items
-        .map(
-          (item, index) => `
-            <details class="action-list__item settlement-explain" ${index === items.length - 1 ? "open" : ""}>
-              <summary class="settlement-explain__summary">
-                <div>
-                  <div class="action-list__title">${formatPeriodLabel(item.period)}</div>
-                  <div class="action-list__meta">${item.expenseCount} khoản chi • ${formatVND(item.expenseTotal)} chi • ${item.paymentCount} thanh toán • ${formatVND(item.paymentTotal)} đã trả</div>
-                </div>
-                <div class="settlement-explain__side">
-                  <div class="money-card__label">Đến cuối tháng này</div>
-                  <div class="fw-semibold">${item.settlementPlan.length ? `${item.settlementPlan.length} dòng còn nợ` : "Đã cân bằng"}</div>
-                </div>
-              </summary>
-              <div class="settlement-explain__body">
-                ${
-                  item.settlementPlan.length
-                    ? `
-                      <div class="stack-list">
-                        ${item.settlementPlan
-                          .map(
-                            (line) => `
-                              <div class="action-list__item settlement-explain__line">
-                                <div class="action-list__head">
-                                  <div>
-                                    <div class="action-list__title">${nameOf(line.fromId)} -> ${nameOf(line.toId)}</div>
-                                    <div class="action-list__meta">Còn lại sau khi cộng dồn đến hết ${formatPeriodLabel(item.period).toLowerCase()}</div>
-                                  </div>
-                                  <div class="fw-semibold">${formatVND(line.amount)}</div>
-                                </div>
-                              </div>
-                            `,
-                          )
-                          .join("")}
-                      </div>
-                    `
-                    : `
-                      <div class="empty-state">
-                        <div class="empty-state__title">Không còn cấn trừ</div>
-                        <div class="empty-state__text">
-                          Sau khi cộng dồn đến hết tháng này, các khoản nợ đã được cân bằng.
-                        </div>
-                      </div>
-                    `
-                }
-              </div>
-            </details>
           `,
         )
         .join("")}
@@ -555,8 +427,14 @@ export async function renderPaymentsPage(options = {}) {
                 </div>
               </details>
 
-              <details class="card section-card" id="paymentsVerification" ${openVerification ? "open" : ""}>
-                <summary class="card-header">Xem ma trận đối chiếu theo tháng</summary>
+              <details class="card section-card section-toggle" id="paymentsVerification" ${openVerification ? "open" : ""}>
+                <summary class="card-header section-toggle__summary">
+                  <div>
+                    <div class="section-toggle__title">Xem ma trận đối chiếu theo tháng</div>
+                    <div class="section-toggle__subtitle">Đang đối chiếu ${formatPeriodLabel(verificationPeriod).toLowerCase()}.</div>
+                  </div>
+                  <span class="filter-pill filter-pill--neutral">${formatPeriodLabel(verificationPeriod)}</span>
+                </summary>
                 <div class="card-body section-card__body">
                   ${renderSectionHeader({
                     title: "Đối chiếu theo tháng",
