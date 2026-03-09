@@ -99,7 +99,6 @@ export function sanitizeRentPayload(period, payload, existingRent = null) {
   );
 
   return {
-    ...existingRent,
     period,
     payerId: String(payload?.payerId || ""),
     items,

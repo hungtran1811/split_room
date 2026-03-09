@@ -30,7 +30,7 @@ export function ensurePaymentModal() {
           <div class="mb-3">
             <label class="form-label">Số tiền</label>
             <input id="payAmount" class="form-control" />
-            <div class="form-text" id="payAmountHelp">Có thể nhập số lẻ (VD: 10.000,5)</div>
+            <div class="form-text" id="payAmountHelp">Chỉ nhập số nguyên, VD: 10.000</div>
           </div>
 
           <div class="mb-2">
@@ -103,7 +103,7 @@ export function openPaymentModal({
 
   amountHelp.textContent = lockAmount
     ? "Số tiền đã bị khóa theo cấn trừ."
-    : "Có thể nhập số lẻ (VD: 10.000,5)";
+    : "Chỉ nhập số nguyên, VD: 10.000";
 
   noteEl.value = defaultNote || "";
   errEl.textContent = "";
@@ -117,7 +117,7 @@ export function openPaymentModal({
     btn.disabled = true;
 
     try {
-      const amt = parseVndInput(amountEl.value);
+      const amt = Math.round(parseVndInput(amountEl.value));
       if (!amt || amt <= 0) throw new Error("Số tiền không hợp lệ.");
 
       if (lockAmount) {

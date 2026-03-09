@@ -19,6 +19,14 @@ service cloud.firestore {
       ];
     }
 
+    function ownerEmail() {
+      return "hungtran00.nt@gmail.com";
+    }
+
+    function ownerMemberId() {
+      return "hung";
+    }
+
     function isAllowedEmail() {
       return signedIn() && authEmail() in allowedEmails();
     }
@@ -27,7 +35,7 @@ service cloud.firestore {
       return /databases/$(database)/documents/groups/$(groupId)/members/$(uid);
     }
 
-    function legacyAdminUid() {
+    function legacyOwnerUid() {
       return "8tgX0c2IBbTx0k0oIZgn7w2H12b2";
     }
 
@@ -49,7 +57,8 @@ service cloud.firestore {
       return signedIn()
         && isAllowedEmail()
         && (
-          request.auth.uid == legacyAdminUid()
+          request.auth.uid == legacyOwnerUid()
+          || authEmail() == ownerEmail()
           || (
             memberExists(groupId, request.auth.uid)
             && memberDoc(groupId, request.auth.uid).data.role == "owner"
@@ -80,13 +89,20 @@ service cloud.firestore {
     function validMemberWrite(uid) {
       return request.resource.data.uid == uid
         && request.resource.data.memberId is string
+        && request.resource.data.memberId.size() > 0
         && request.resource.data.email is string
+        && request.resource.data.email.size() > 0
         && validRole(request.resource.data.role);
     }
 
     function validSelfCreateRole(uid) {
       return request.resource.data.role == "member"
-        || (uid == legacyAdminUid() && request.resource.data.role == "owner");
+        || (
+          request.resource.data.role == "owner"
+          && request.resource.data.memberId == ownerMemberId()
+          && request.resource.data.email == ownerEmail()
+          && (uid == legacyOwnerUid() || authEmail() == ownerEmail())
+        );
     }
 
     function rentAllowedKeys() {
@@ -118,6 +134,7 @@ service cloud.firestore {
         && request.resource.data.period.matches(periodRegex())
         && request.resource.data.period == rentId
         && request.resource.data.payerId is string
+        && request.resource.data.payerId.size() > 0
         && request.resource.data.items is map
         && request.resource.data.total is number
         && request.resource.data.total >= 0
@@ -130,11 +147,13 @@ service cloud.firestore {
         && request.resource.data.shares is map
         && request.resource.data.paid is map
         && request.resource.data.createdBy is string
+        && request.resource.data.createdBy.size() > 0
         && (!request.resource.data.keys().hasAny(["status"])
           || request.resource.data.status in ["draft", "finalized"])
         && (!request.resource.data.keys().hasAny(["finalizedAt"])
           || request.resource.data.finalizedAt == null
-          || request.resource.data.finalizedAt is string)
+          || request.resource.data.finalizedAt is string
+          || request.resource.data.finalizedAt is timestamp)
         && (!request.resource.data.keys().hasAny(["finalizedBy"])
           || request.resource.data.finalizedBy == null
           || request.resource.data.finalizedBy is string);
@@ -155,11 +174,13 @@ service cloud.firestore {
       match /members/{uid} {
         allow read: if isGroupMember(groupId)
           || (signedIn() && isAllowedEmail() && request.auth.uid == uid);
+
         allow create: if isAllowedEmail()
           && request.auth.uid == uid
           && request.resource.data.email == request.auth.token.email
           && validMemberWrite(uid)
           && validSelfCreateRole(uid);
+
         allow update: if (
             isGroupOwner(groupId)
             && validMemberWrite(uid)
@@ -167,7 +188,8 @@ service cloud.firestore {
             && request.resource.data.email == resource.data.email
             && request.resource.data.memberId == resource.data.memberId
           )
-          || (signedIn()
+          || (
+            signedIn()
             && isAllowedEmail()
             && request.auth.uid == uid
             && request.resource.data.uid == uid
@@ -179,7 +201,15 @@ service cloud.firestore {
                 !resource.data.keys().hasAny(["role"])
                 && request.resource.data.role == "member"
               )
-            ));
+              || (
+                authEmail() == ownerEmail()
+                && request.resource.data.email == ownerEmail()
+                && request.resource.data.memberId == ownerMemberId()
+                && request.resource.data.role == "owner"
+              )
+            )
+          );
+
         allow delete: if isGroupOwner(groupId);
       }
 
@@ -196,12 +226,21 @@ service cloud.firestore {
 
       match /rents/{rentId} {
         allow read: if isGroupMember(groupId);
+
         allow create: if isGroupOperator(groupId)
           && validRentShape(rentId)
           && request.resource.data.createdBy is string;
+
         allow update: if isGroupOperator(groupId)
           && validRentShape(rentId)
-          && request.resource.data.createdBy == resource.data.createdBy;
+          && (
+            request.resource.data.createdBy == resource.data.createdBy
+            || (
+              !resource.data.keys().hasAny(["createdBy"])
+              && request.resource.data.createdBy is string
+            )
+          );
+
         allow delete: if isGroupOperator(groupId);
       }
 

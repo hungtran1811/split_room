@@ -478,9 +478,128 @@ button.action-list__item {
   padding-top: 14px;
 }
 
+.settlement-explain__cross-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.settlement-explain__people-card {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: #fff;
+}
+
+.settlement-explain__person-list {
+  display: grid;
+  gap: 8px;
+}
+
+.settlement-explain__person-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-top: 1px solid rgba(216, 224, 235, 0.72);
+}
+
+.settlement-explain__person-row:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
 .settlement-explain__line {
   padding: 12px 14px;
   background: #fbfdff;
+}
+
+.settlement-explain__month {
+  display: grid;
+  gap: 0;
+  padding: 14px;
+  border: 1px solid rgba(216, 224, 235, 0.92);
+  border-radius: 16px;
+  background: #fff;
+}
+
+.settlement-explain__month-summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.settlement-explain__month-summary::-webkit-details-marker {
+  display: none;
+}
+
+.settlement-explain__month-body {
+  display: grid;
+  gap: 12px;
+  padding-top: 14px;
+}
+
+.settlement-explain__events-toggle {
+  display: grid;
+  gap: 0;
+  border: 1px dashed rgba(216, 224, 235, 0.92);
+  border-radius: 16px;
+  background: #fbfdff;
+}
+
+.settlement-explain__events-summary {
+  display: inline-flex;
+  align-items: center;
+  min-height: 42px;
+  padding: 0 14px;
+  cursor: pointer;
+  list-style: none;
+  font-size: var(--text-sm);
+  font-weight: 700;
+}
+
+.settlement-explain__events-summary::-webkit-details-marker {
+  display: none;
+}
+
+.settlement-explain__event {
+  padding: 12px 14px;
+  border: 1px solid rgba(216, 224, 235, 0.92);
+  border-radius: 16px;
+  background: #fff;
+}
+
+.settlement-explain__event-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.settlement-explain__event-title {
+  margin-top: 8px;
+  font-size: var(--text-base);
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.settlement-explain__meta {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  line-height: 1.45;
+}
+
+@media (min-width: 768px) {
+  .settlement-explain__cross-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .chip-toggle {

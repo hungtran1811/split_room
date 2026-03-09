@@ -81,6 +81,77 @@ function computeSettlementPlan(memberIds, expenses, payments) {
   }));
 }
 
+function sumAmount(items = []) {
+  return items.reduce((sum, item) => sum + Number(item?.amount || 0), 0);
+}
+
+function periodKeyOfDate(date) {
+  const value = String(date || "").slice(0, 7);
+  return /^\d{4}-\d{2}$/.test(value) ? value : null;
+}
+
+function formatPeriodLabel(period) {
+  const [year, month] = String(period || "").split("-");
+  if (!year || !month) return period || "-";
+  return `Tháng ${Number(month)} năm ${year}`;
+}
+
+function listHistoricalPeriods(expenses = [], payments = [], period) {
+  const { start } = getMonthRange(period);
+  const months = new Set();
+
+  for (const item of expenses) {
+    const date = String(item?.date || "");
+    if (date >= start) continue;
+    const monthKey = periodKeyOfDate(date);
+    if (monthKey) months.add(monthKey);
+  }
+
+  for (const item of payments) {
+    const date = String(item?.date || "");
+    if (date >= start) continue;
+    const monthKey = periodKeyOfDate(date);
+    if (monthKey) months.add(monthKey);
+  }
+
+  return [...months].sort();
+}
+
+function buildPreviousDebtTimeline(memberIds, expenses = [], payments = [], period) {
+  const months = listHistoricalPeriods(expenses, payments, period);
+  const timeline = [];
+  let cumulativeExpenses = [];
+  let cumulativePayments = [];
+
+  for (const monthKey of months) {
+    const monthExpenses = expenses.filter((item) =>
+      String(item?.date || "").startsWith(`${monthKey}-`),
+    );
+    const monthPayments = payments.filter((item) =>
+      String(item?.date || "").startsWith(`${monthKey}-`),
+    );
+
+    cumulativeExpenses = cumulativeExpenses.concat(monthExpenses);
+    cumulativePayments = cumulativePayments.concat(monthPayments);
+
+    const carryPlan = computeSettlementPlan(
+      memberIds,
+      cumulativeExpenses,
+      cumulativePayments,
+    );
+
+    timeline.push({
+      period: monthKey,
+      expenseTotal: sumAmount(monthExpenses),
+      paymentTotal: sumAmount(monthPayments),
+      carryTotal: sumAmount(carryPlan),
+      carryCount: carryPlan.length,
+    });
+  }
+
+  return timeline;
+}
+
 function summarizeRentForMember(rentDoc, memberId) {
   if (!rentDoc || !memberId) return null;
 
@@ -147,7 +218,7 @@ function renderHeroRow(stats) {
       ${renderMoneyStatCard({
         label: "Còn cấn trừ",
         value: stats.settlementCount ? `${stats.settlementCount} dòng` : "0 dòng",
-        hint: stats.settlementCount ? "Cần xử lý thanh toán" : "Đã cân bằng",
+        hint: stats.settlementCount ? "Cần xử lý trong tháng" : "Đã cân bằng trong tháng",
         tone: stats.settlementCount ? "danger" : "positive",
         size: "lg",
       })}
@@ -309,22 +380,102 @@ function renderRentSection(rentSummary) {
   `;
 }
 
-function renderSettlementSection(items, options = {}) {
-  const {
-    subtitle = "Các khoản thanh toán còn lại sau khi đã áp payment trong tháng.",
-    emptyText = "Các khoản nợ đã cân bằng ở tháng này.",
-    showOpenPaymentsCta = true,
-  } = options;
+function renderPreviousDebtSection(items, period, timeline = []) {
+  const totalDebt = sumAmount(items);
 
   return `
     <section class="card section-card">
       <div class="card-body section-card__body">
         ${renderSectionHeader({
+          title: "Nợ cũ từ các tháng trước",
+          subtitle: `Các khoản còn treo trước ${period.replace("-", "/")} để cả nhóm không quên xử lý tiếp.`,
+        })}
+        ${
+          items.length
+            ? `
+              <div class="summary-strip">
+                <div class="summary-strip__item">
+                  <span class="summary-strip__label">Tong no chuyen ky</span>
+                  <span class="summary-strip__value">${formatVND(totalDebt)}</span>
+                </div>
+                <div class="summary-strip__item">
+                  <span class="summary-strip__label">So dong con treo</span>
+                  <span class="summary-strip__value">${items.length} dong</span>
+                </div>
+                <div class="summary-strip__item">
+                  <span class="summary-strip__label">So thang co phat sinh</span>
+                  <span class="summary-strip__value">${timeline.length} thang</span>
+                </div>
+              </div>
+              <div class="action-list">
+                ${items
+                  .slice(0, 4)
+                  .map(
+                    (item) => `
+                      <article class="action-list__item">
+                        <div class="action-list__head">
+                          <div>
+                            <div class="action-list__title">${nameOf(item.fromId)} -> ${nameOf(item.toId)}</div>
+                            <div class="action-list__meta">Còn nợ từ các tháng trước ${formatVND(item.amount)}</div>
+                          </div>
+                        </div>
+                      </article>
+                    `,
+                  )
+                  .join("")}
+              </div>
+              ${
+                timeline.length
+                  ? `
+                    <details class="settlement-explain__events-toggle">
+                      <summary class="settlement-explain__events-summary">
+                        Xem nhanh no chuyen theo tung thang (${timeline.length} thang)
+                      </summary>
+                      <div class="stack-list p-3 pt-0">
+                        ${timeline
+                          .map(
+                            (entry) => `
+                              <article class="action-list__item">
+                                <div class="action-list__head">
+                                  <div>
+                                    <div class="action-list__title">${formatPeriodLabel(entry.period)}</div>
+                                    <div class="action-list__meta">Chi tieu: ${formatVND(entry.expenseTotal)} • Thanh toan: ${formatVND(entry.paymentTotal)}</div>
+                                    <div class="action-list__meta">Cuoi thang con chuyen: ${formatVND(entry.carryTotal)} (${entry.carryCount} dong)</div>
+                                  </div>
+                                </div>
+                              </article>
+                            `,
+                          )
+                          .join("")}
+                      </div>
+                    </details>
+                  `
+                  : ""
+              }
+            `
+            : `
+              <div class="empty-state">
+                <div class="empty-state__title">Không còn nợ cũ</div>
+                <div class="empty-state__text">
+                  Các khoản phát sinh từ những tháng trước đã được cân bằng.
+                </div>
+              </div>
+            `
+        }
+      </div>
+    </section>
+  `;
+}
+
+function renderSettlementSection(items) {
+  return `
+    <section class="card section-card">
+      <div class="card-body section-card__body">
+        ${renderSectionHeader({
           title: "Cấn trừ hiện tại",
-          subtitle,
-          action: showOpenPaymentsCta
-            ? '<a class="btn ui-action-pill ui-action-pill--secondary section-cta" href="#/payments">Mở thanh toán</a>'
-            : "",
+          subtitle: "Các khoản còn cần thanh toán trong tháng đang xem sau khi đã áp payment.",
+          action:
+            '<a class="btn ui-action-pill ui-action-pill--secondary section-cta" href="#/payments">Mở thanh toán</a>',
         })}
         ${
           items.length
@@ -355,33 +506,11 @@ function renderSettlementSection(items, options = {}) {
             `
             : `
               <div class="empty-state">
-                <div class="empty-state__title">Không còn cấn trừ nào</div>
-                <div class="empty-state__text">${emptyText}</div>
+                <div class="empty-state__title">Không còn khoản cấn trừ nào</div>
+                <div class="empty-state__text">Không còn khoản cấn trừ nào trong tháng này.</div>
               </div>
             `
         }
-      </div>
-    </section>
-  `;
-}
-
-function renderSettlementSectionLoading() {
-  return `
-    <section class="card section-card">
-      <div class="card-body section-card__body">
-        ${renderSectionHeader({
-          title: "Cấn trừ hiện tại",
-          subtitle:
-            "Tổng các khoản còn cần thanh toán từ trước tới nay, không chỉ riêng tháng đang xem.",
-        })}
-        <div class="card">
-          <div class="card-body d-flex align-items-center gap-3">
-            <div class="spinner-border spinner-border-sm" role="status" aria-label="Loading"></div>
-            <div class="text-secondary small">
-              Đang tải cấn trừ toàn bộ lịch sử...
-            </div>
-          </div>
-        </div>
       </div>
     </section>
   `;
@@ -483,10 +612,24 @@ export function renderDashboardPage() {
       liveExpenses,
       livePayments,
     );
-    const allTimeSettlementPlan =
+    const { start } = getMonthRange(period);
+    const previousDebtSettlementPlan =
       allTimeExpensesReady && allTimePaymentsReady
-        ? computeSettlementPlan(memberIds, allTimeExpenses, allTimePayments)
+        ? computeSettlementPlan(
+            memberIds,
+            allTimeExpenses.filter((item) => String(item.date || "") < start),
+            allTimePayments.filter((item) => String(item.date || "") < start),
+          )
         : null;
+    const previousDebtTimeline =
+      allTimeExpensesReady && allTimePaymentsReady
+        ? buildPreviousDebtTimeline(
+            memberIds,
+            allTimeExpenses,
+            allTimePayments,
+            period,
+          )
+        : [];
 
     const rentSummary = summarizeRentForMember(liveRent, myMemberId);
     const stats = {
@@ -551,16 +694,30 @@ export function renderDashboardPage() {
 
         ${renderRentSection(rentSummary)}
         ${
-          allTimeSettlementPlan
-            ? renderSettlementSection(allTimeSettlementPlan, {
-                subtitle:
-                  "Tổng các khoản còn cần thanh toán từ trước tới nay, không chỉ riêng tháng đang xem.",
-                emptyText:
-                  "Nếu tính trên toàn bộ dữ liệu hiện có, các khoản nợ đã được cân bằng.",
-                showOpenPaymentsCta: false,
-              })
-            : renderSettlementSectionLoading()
+          previousDebtSettlementPlan
+            ? renderPreviousDebtSection(
+                previousDebtSettlementPlan,
+                period,
+                previousDebtTimeline,
+              )
+            : `
+              <section class="card section-card">
+                <div class="card-body section-card__body">
+                  ${renderSectionHeader({
+                    title: "Nợ cũ từ các tháng trước",
+                    subtitle: "Đang kiểm tra các khoản còn treo trước tháng đang xem.",
+                  })}
+                  <div class="card">
+                    <div class="card-body d-flex align-items-center gap-3">
+                      <div class="spinner-border spinner-border-sm" role="status" aria-label="Loading"></div>
+                      <div class="text-secondary small">Đang tải nợ cũ...</div>
+                    </div>
+                  </div>
+                </div>
+              </section>
+            `
         }
+        ${renderSettlementSection(settlementPlan)}
       `,
       periodActions,
     );
@@ -571,7 +728,7 @@ export function renderDashboardPage() {
           .getAttribute("data-copy")
           .split("|");
         const amount = Number(amountString || 0);
-        const text = `${nameOf(fromId)} chuyển ${formatVND(amount)} cho ${nameOf(toId)} (cấn trừ hiện tại)`;
+        const text = `${nameOf(fromId)} chuyển ${formatVND(amount)} cho ${nameOf(toId)} (cấn trừ tháng này)`;
 
         try {
           await navigator.clipboard.writeText(text);

@@ -39,7 +39,7 @@ describe("rent domain", () => {
     });
   });
 
-  it("sanitizeRentPayload preserves createdBy and finalized metadata from existing docs", () => {
+  it("sanitizeRentPayload preserves createdBy but strips legacy finalized metadata", () => {
     const payload = sanitizeRentPayload(
       "2026-03",
       {
@@ -64,7 +64,8 @@ describe("rent domain", () => {
     );
 
     expect(payload.createdBy).toBe("old-admin");
-    expect(payload.status).toBe("finalized");
-    expect(payload.finalizedBy).toBe("old-admin");
+    expect(payload.status).toBeUndefined();
+    expect(payload.finalizedAt).toBeUndefined();
+    expect(payload.finalizedBy).toBeUndefined();
   });
 });
