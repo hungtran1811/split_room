@@ -41,6 +41,14 @@ function formatPaymentVND(amount) {
   return formatVND(roundWhole(amount));
 }
 
+function payableSettlementAmount(amount) {
+  return Math.max(0, roundWhole(amount));
+}
+
+function settlementActionValue(item) {
+  return `${item.fromId}|${item.toId}|${payableSettlementAmount(item.amount)}`;
+}
+
 function sumAmount(items = []) {
   return items.reduce((sum, item) => sum + Number(item?.amount || 0), 0);
 }
@@ -250,10 +258,10 @@ function renderSettlementList(items, canOperateMonth, options = {}) {
                 canOperateMonth
                   ? `
                     <div class="d-flex flex-wrap gap-2 mt-3">
-                      <button class="btn ui-action-pill ui-action-pill--primary section-cta" data-pay-full="${item.fromId}|${item.toId}|${item.amount}">
+                      <button class="btn ui-action-pill ui-action-pill--primary section-cta" data-pay-full="${settlementActionValue(item)}">
                         Trả đủ
                       </button>
-                      <button class="btn ui-action-pill ui-action-pill--secondary section-cta" data-pay-part="${item.fromId}|${item.toId}|${item.amount}">
+                      <button class="btn ui-action-pill ui-action-pill--secondary section-cta" data-pay-part="${settlementActionValue(item)}">
                         Trả một phần
                       </button>
                     </div>
@@ -325,10 +333,10 @@ function renderPreviousDebtByMonth(timeline, canOperateMonth) {
                                         canOperateMonth
                                           ? `
                                             <div class="d-flex flex-wrap gap-2">
-                                              <button class="btn ui-action-pill ui-action-pill--primary section-cta" data-pay-full="${item.fromId}|${item.toId}|${item.amount}">
+                                              <button class="btn ui-action-pill ui-action-pill--primary section-cta" data-pay-full="${settlementActionValue(item)}">
                                                 Trả đủ
                                               </button>
-                                              <button class="btn ui-action-pill ui-action-pill--secondary section-cta" data-pay-part="${item.fromId}|${item.toId}|${item.amount}">
+                                              <button class="btn ui-action-pill ui-action-pill--secondary section-cta" data-pay-part="${settlementActionValue(item)}">
                                                 Trả một phần
                                               </button>
                                             </div>
@@ -692,7 +700,7 @@ export async function renderPaymentsPage(options = {}) {
         const [fromId, toId, amountString] = button
           .getAttribute("data-pay-full")
           .split("|");
-        const amount = Number(amountString || 0);
+        const amount = payableSettlementAmount(amountString);
 
         openPaymentModal({
           fromName: nameOf(fromId),
@@ -732,7 +740,7 @@ export async function renderPaymentsPage(options = {}) {
         const [fromId, toId, amountString] = button
           .getAttribute("data-pay-part")
           .split("|");
-        const amount = Number(amountString || 0);
+        const amount = payableSettlementAmount(amountString);
 
         openPaymentModal({
           fromName: nameOf(fromId),

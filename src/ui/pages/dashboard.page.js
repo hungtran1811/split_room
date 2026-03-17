@@ -395,16 +395,16 @@ function renderPreviousDebtSection(items, period, timeline = []) {
             ? `
               <div class="summary-strip">
                 <div class="summary-strip__item">
-                  <span class="summary-strip__label">Tong no chuyen ky</span>
+                  <span class="summary-strip__label">Tổng nợ chuyển kỳ</span>
                   <span class="summary-strip__value">${formatVND(totalDebt)}</span>
                 </div>
                 <div class="summary-strip__item">
-                  <span class="summary-strip__label">So dong con treo</span>
-                  <span class="summary-strip__value">${items.length} dong</span>
+                  <span class="summary-strip__label">Số dòng còn treo</span>
+                  <span class="summary-strip__value">${items.length} dòng</span>
                 </div>
                 <div class="summary-strip__item">
-                  <span class="summary-strip__label">So thang co phat sinh</span>
-                  <span class="summary-strip__value">${timeline.length} thang</span>
+                  <span class="summary-strip__label">Số tháng có phát sinh</span>
+                  <span class="summary-strip__value">${timeline.length} tháng</span>
                 </div>
               </div>
               <div class="action-list">
@@ -429,7 +429,7 @@ function renderPreviousDebtSection(items, period, timeline = []) {
                   ? `
                     <details class="settlement-explain__events-toggle">
                       <summary class="settlement-explain__events-summary">
-                        Xem nhanh no chuyen theo tung thang (${timeline.length} thang)
+                        Xem nhanh nợ chuyển theo từng tháng (${timeline.length} tháng)
                       </summary>
                       <div class="stack-list p-3 pt-0">
                         ${timeline
@@ -439,8 +439,8 @@ function renderPreviousDebtSection(items, period, timeline = []) {
                                 <div class="action-list__head">
                                   <div>
                                     <div class="action-list__title">${formatPeriodLabel(entry.period)}</div>
-                                    <div class="action-list__meta">Chi tieu: ${formatVND(entry.expenseTotal)} • Thanh toan: ${formatVND(entry.paymentTotal)}</div>
-                                    <div class="action-list__meta">Cuoi thang con chuyen: ${formatVND(entry.carryTotal)} (${entry.carryCount} dong)</div>
+                                    <div class="action-list__meta">Chi tiêu: ${formatVND(entry.expenseTotal)} • Thanh toán: ${formatVND(entry.paymentTotal)}</div>
+                                    <div class="action-list__meta">Cuối tháng còn chuyển: ${formatVND(entry.carryTotal)} (${entry.carryCount} dòng)</div>
                                   </div>
                                 </div>
                               </article>
