@@ -416,6 +416,87 @@ function renderPaymentsHistory(payments, canOperate) {
   `;
 }
 
+function renderVerificationSummary(settlement) {
+  return `
+    <div class="summary-strip">
+      <div class="summary-strip__item">
+        <span class="summary-strip__label">Tổng nợ gốc</span>
+        <span class="summary-strip__value">${formatPaymentVND(settlement?.totals?.grossDebtTotal || 0)}</span>
+      </div>
+      <div class="summary-strip__item">
+        <span class="summary-strip__label">Payment đã áp</span>
+        <span class="summary-strip__value">${formatPaymentVND(settlement?.paymentsAppliedTotal || 0)}</span>
+      </div>
+      <div class="summary-strip__item">
+        <span class="summary-strip__label">Còn phải thanh toán</span>
+        <span class="summary-strip__value">${formatPaymentVND(settlement?.totals?.remainingDebtTotal || 0)}</span>
+      </div>
+    </div>
+  `;
+}
+
+function renderAppliedPaymentsList(payments) {
+  if (!payments.length) {
+    return `
+      <div class="empty-state">
+        <div class="empty-state__title">Chưa có payment nào trong tháng</div>
+        <div class="empty-state__text">
+          Bảng đối chiếu đang lấy nguyên nợ gốc của tháng này để tính số dư còn lại.
+        </div>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="action-list">
+      ${sortPayments(payments)
+        .map(
+          (payment) => `
+            <article class="action-list__item">
+              <div class="action-list__head">
+                <div>
+                  <div class="action-list__title">${payment.date} • ${nameOf(payment.fromId)} -> ${nameOf(payment.toId)}</div>
+                  <div class="action-list__meta">${formatPaymentVND(payment.amount)}</div>
+                </div>
+              </div>
+            </article>
+          `,
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+function renderReadonlySettlementList(items, emptyText) {
+  if (!items.length) {
+    return `
+      <div class="empty-state">
+        <div class="empty-state__title">Không còn cấn trừ nào trong tháng</div>
+        <div class="empty-state__text">${emptyText}</div>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="action-list">
+      ${items
+        .map(
+          (item) => `
+            <article class="action-list__item">
+              <div class="action-list__head">
+                <div>
+                  <div class="action-list__title">${nameOf(item.fromId)} -> ${nameOf(item.toId)}</div>
+                  <div class="action-list__meta">Còn lại ${formatPaymentVND(item.amount)}</div>
+                </div>
+              </div>
+            </article>
+          `,
+        )
+        .join("")}
+    </div>
+  `;
+}
+
 function renderLoading() {
   return `
     <div class="card">
@@ -497,6 +578,74 @@ function renderBalancesList(balances) {
         `;
       }).join("")}
     </div>
+  `;
+}
+
+function renderVerificationAuditPanels(period, expenses, payments, settlement) {
+  if (!expenses.length && !payments.length) {
+    return `
+      <div class="empty-state">
+        <div class="empty-state__title">Tháng này chưa có dữ liệu đối chiếu</div>
+        <div class="empty-state__text">
+          Chưa có khoản chi hoặc thanh toán nào trong ${formatPeriodLabel(period).toLowerCase()} để tạo ma trận đối chiếu.
+        </div>
+      </div>
+    `;
+  }
+
+  return `
+    ${renderVerificationSummary(settlement)}
+
+    <section class="card">
+      <div class="card-body section-card__body">
+        ${renderSectionHeader({
+          title: "Ma trận nợ gốc",
+          subtitle: "Bảng nợ phát sinh từ các khoản chi trong tháng đã chọn.",
+        })}
+        ${renderMatrixTable({
+          members: ROSTER,
+          matrix: settlement.grossMatrix,
+          formatAmount: formatPaymentVND,
+          title: "Ma trận nợ gốc từ chi tiêu",
+        })}
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-body section-card__body">
+        ${renderSectionHeader({
+          title: "Payment đã áp trong tháng",
+          subtitle:
+            "Các giao dịch thanh toán được trích vào đối chiếu của riêng tháng đang xem.",
+        })}
+        ${renderAppliedPaymentsList(payments)}
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-body section-card__body">
+        ${renderSectionHeader({
+          title: "Số dư sau khi áp payment",
+          subtitle:
+            "Số dư của riêng tháng này sau khi đã trừ các payment ghi nhận trong tháng.",
+        })}
+        ${renderBalancesList(settlement.balances)}
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-body section-card__body">
+        ${renderSectionHeader({
+          title: "Cấn trừ còn lại của tháng",
+          subtitle:
+            "Đây là các dòng thanh toán còn lại sau khi đã trừ toàn bộ payment trong tháng.",
+        })}
+        ${renderReadonlySettlementList(
+          settlement.settlementPlan,
+          "Nếu chỉ tính riêng tháng đang xem, các khoản nợ đã được cân bằng.",
+        )}
+      </div>
+    </section>
   `;
 }
 
@@ -657,7 +806,7 @@ export async function renderPaymentsPage(options = {}) {
               subtitle:
                 "Ma trận dưới đây chỉ tính riêng tháng đang xem để mọi người tự kiểm tra nhanh.",
             })}
-            ${renderVerificationPanels(
+            ${renderVerificationAuditPanels(
               period,
               monthExpenses,
               monthPayments,

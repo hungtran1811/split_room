@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ROSTER } from "../src/config/roster.js";
+import { buildMonthlySettlementView } from "../src/domain/matrix/compute.js";
 import {
   applyPaymentsToBalances,
   buildMonthlyReport,
@@ -114,5 +115,40 @@ describe("report domain", () => {
 
     expect(report.settlementPlan.every((item) => item.amount > 0)).toBe(true);
     expect(report.stats.settlementCount).toBe(report.settlementPlan.length);
+  });
+
+  it("matches the canonical monthly settlement builder", () => {
+    const expenses = [
+      {
+        payerId: "thao",
+        amount: 1598416,
+        debts: {
+          hung: 269083.67,
+          thinh: 482083.33,
+          thuy: 847249,
+        },
+      },
+    ];
+    const payments = [
+      { fromId: "hung", toId: "thao", amount: 37668 },
+      { fromId: "thuy", toId: "thao", amount: 318999 },
+    ];
+
+    const report = buildMonthlyReport({
+      period: "2026-03",
+      roster: ROSTER,
+      expenses,
+      payments,
+      rent: null,
+    });
+    const canonical = buildMonthlySettlementView({
+      roster: ROSTER,
+      expenses,
+      payments,
+    });
+
+    expect(report.balances).toEqual(canonical.balances);
+    expect(report.settlementPlan).toEqual(canonical.settlementPlan);
+    expect(report.stats.settlementCount).toBe(canonical.settlementPlan.length);
   });
 });

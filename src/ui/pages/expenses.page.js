@@ -23,6 +23,10 @@ import {
 import { watchMonthExpenses } from "../../services/month-ops.service";
 import { renderMoneyStatCard } from "../components/moneyStatCard";
 import { renderSectionHeader } from "../components/sectionHeader";
+import {
+  buildWholeEqualShares,
+  toWholeVnd,
+} from "../../domain/money/whole-vnd";
 
 function byId(id) {
   return document.getElementById(id);
@@ -118,7 +122,7 @@ export async function renderExpensesPage() {
       const memberId = input.dataset.id;
       if (memberId === payerId || input.disabled) return;
 
-      const value = parseVndInput(input.value);
+      const value = toWholeVnd(parseVndInput(input.value));
       if (value > 0) {
         debts[memberId] = value;
       }
@@ -128,7 +132,7 @@ export async function renderExpensesPage() {
   }
 
   function recalcTotals() {
-    const amount = parseVndInput(byId("exAmount").value);
+    const amount = toWholeVnd(parseVndInput(byId("exAmount").value));
     const payerId = byId("exPayer").value;
     const debts = getDebtsFromInputs(payerId);
     const sumDebts = Object.values(debts).reduce((sum, value) => sum + value, 0);
@@ -140,18 +144,17 @@ export async function renderExpensesPage() {
 
   function renderDebtsInputs() {
     const payerId = byId("exPayer").value;
-    const amount = parseVndInput(byId("exAmount").value);
+    const amount = toWholeVnd(parseVndInput(byId("exAmount").value));
     const equalSplit = byId("exEqual").checked;
     const participants = getParticipantIds();
-    const participantCount = participants.length;
     const debtors = participants.filter((memberId) => memberId !== payerId);
-    const eachShare = participantCount > 0 ? amount / participantCount : 0;
+    const equalShares = buildWholeEqualShares(amount, participants);
     const box = byId("debtsBox");
 
     box.innerHTML = ROSTER_IDS.filter((memberId) => memberId !== payerId)
       .map((memberId) => {
         const active = debtors.includes(memberId);
-        const value = equalSplit && active ? eachShare : 0;
+        const value = equalSplit && active ? equalShares[memberId] || 0 : 0;
 
         return `
           <div class="col-12 col-md-6">
@@ -186,7 +189,7 @@ export async function renderExpensesPage() {
 
   async function saveExpense() {
     const date = byId("exDate").value || expenseDateForPeriod(selectedPeriod);
-    const amount = parseVndInput(byId("exAmount").value);
+    const amount = toWholeVnd(parseVndInput(byId("exAmount").value));
     const payerId = byId("exPayer").value;
     const note = byId("exNote").value.trim();
     const participants = getParticipantIds();

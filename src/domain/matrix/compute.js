@@ -1,25 +1,25 @@
 import { buildGrossMatrix } from "../../engine/grossMatrix";
 import { computeNetBalances } from "../../engine/netBalance";
 import { settleDebts } from "../../engine/settle";
-
-function roundMoney(value) {
-  const parsed = Number(value || 0);
-  if (!Number.isFinite(parsed)) return 0;
-  return Math.round(parsed * 100) / 100;
-}
+import {
+  normalizeWholeBalances,
+  normalizeWholeMatrix,
+  sumNumeric,
+  toWholeVnd,
+} from "../money/whole-vnd";
 
 export function applyPaymentsToBalances(balances, payments = []) {
   const next = { ...(balances || {}) };
 
   for (const payment of payments) {
-    const amount = roundMoney(payment?.amount || 0);
+    const amount = Number(payment?.amount || 0);
     const fromId = payment?.fromId;
     const toId = payment?.toId;
 
     if (!fromId || !toId || amount <= 0) continue;
 
-    next[fromId] = roundMoney((next[fromId] || 0) + amount);
-    next[toId] = roundMoney((next[toId] || 0) - amount);
+    next[fromId] = Number(next[fromId] || 0) + amount;
+    next[toId] = Number(next[toId] || 0) - amount;
   }
 
   return next;
@@ -38,15 +38,37 @@ export function buildSettleMatrix(memberIds, settlementPlan = []) {
   for (const item of settlementPlan) {
     const fromId = item?.fromId || item?.from || item?.debtorId;
     const toId = item?.toId || item?.to || item?.creditorId;
-    const amount = roundMoney(item?.amount || item?.amt || 0);
+    const amount = toWholeVnd(item?.amount || item?.amt || 0);
 
     if (!fromId || !toId || amount <= 0) continue;
     if (!matrix[fromId] || matrix[fromId][toId] === undefined) continue;
 
-    matrix[fromId][toId] = roundMoney(matrix[fromId][toId] + amount);
+    matrix[fromId][toId] = toWholeVnd(matrix[fromId][toId] + amount);
   }
 
   return matrix;
+}
+
+function buildWholeSettlementPlan(balances = {}) {
+  return settleDebts(balances).map((item) => ({
+    fromId: item.fromId || item.from || item.debtorId,
+    toId: item.toId || item.to || item.creditorId,
+    amount: toWholeVnd(item.amount || item.amt || 0),
+  }));
+}
+
+function computeMatrixTotal(matrix = {}, memberIds = []) {
+  return toWholeVnd(
+    memberIds.reduce((sum, debtorId) => {
+      return (
+        sum +
+        memberIds.reduce((rowSum, creditorId) => {
+          if (debtorId === creditorId) return rowSum;
+          return rowSum + Number(matrix?.[debtorId]?.[creditorId] || 0);
+        }, 0)
+      );
+    }, 0),
+  );
 }
 
 export function buildMonthlySettlementView({
@@ -55,25 +77,36 @@ export function buildMonthlySettlementView({
   payments = [],
 }) {
   const memberIds = roster.map((member) => member.id);
-  const grossMatrix = buildGrossMatrix(memberIds, expenses);
-  const rawBalances = computeNetBalances(memberIds, grossMatrix);
-  const balances = applyPaymentsToBalances(rawBalances, payments);
-  const settlementPlan = settleDebts(balances).map((item) => ({
-    fromId: item.fromId || item.from || item.debtorId,
-    toId: item.toId || item.to || item.creditorId,
-    amount: roundMoney(item.amount || item.amt || 0),
-  }));
+  const rawGrossMatrix = buildGrossMatrix(memberIds, expenses);
+  const grossMatrix = normalizeWholeMatrix(memberIds, rawGrossMatrix);
+  const balancesBeforePayments = Object.fromEntries(
+    Object.entries(computeNetBalances(memberIds, grossMatrix)).map(
+      ([memberId, amount]) => [memberId, toWholeVnd(amount)],
+    ),
+  );
+  const rawBalancesAfterPayments = applyPaymentsToBalances(
+    balancesBeforePayments,
+    payments,
+  );
+  const balances = normalizeWholeBalances(memberIds, rawBalancesAfterPayments);
+  const settlementPlan = buildWholeSettlementPlan(balances);
   const settleMatrix = buildSettleMatrix(memberIds, settlementPlan);
+  const paymentsAppliedTotal = toWholeVnd(
+    sumNumeric((payments || []).map((payment) => payment?.amount || 0)),
+  );
 
   return {
     grossMatrix,
-    balances: Object.fromEntries(
-      Object.entries(balances).map(([memberId, value]) => [
-        memberId,
-        roundMoney(value),
-      ]),
-    ),
+    balancesBeforePayments,
+    paymentsAppliedTotal,
+    balances,
     settlementPlan,
     settleMatrix,
+    totals: {
+      grossDebtTotal: computeMatrixTotal(grossMatrix, memberIds),
+      remainingDebtTotal: toWholeVnd(
+        sumNumeric(settlementPlan.map((item) => item.amount)),
+      ),
+    },
   };
 }

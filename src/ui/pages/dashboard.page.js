@@ -27,17 +27,11 @@ import { mountPrimaryNav } from "../layout/navbar";
 import { renderFilterPill } from "../components/filterBar";
 import { renderMoneyStatCard } from "../components/moneyStatCard";
 import { renderSectionHeader } from "../components/sectionHeader";
-import { buildGrossMatrix } from "../../engine/grossMatrix";
-import { computeNetBalances } from "../../engine/netBalance";
-import { settleDebts } from "../../engine/settle";
+import { buildMonthlySettlementView } from "../../domain/matrix/compute";
 
 function clampPercent(value) {
   if (!Number.isFinite(value)) return 0;
   return Math.max(0, Math.min(100, value));
-}
-
-function roundVnd(value) {
-  return Math.round(Number(value || 0));
 }
 
 function nameOf(memberId) {
@@ -50,35 +44,6 @@ function getMyMemberId() {
     EMAIL_TO_MEMBER_ID[state.user?.email || ""] ||
     null
   );
-}
-
-function applyPaymentsToBalances(balances, payments) {
-  const next = { ...balances };
-
-  for (const payment of payments || []) {
-    const amount = Number(payment.amount || 0);
-    if (!payment.fromId || !payment.toId || amount <= 0) continue;
-    next[payment.fromId] = (next[payment.fromId] || 0) + amount;
-    next[payment.toId] = (next[payment.toId] || 0) - amount;
-  }
-
-  return next;
-}
-
-function computeSettlementPlan(memberIds, expenses, payments) {
-  const gross = buildGrossMatrix(memberIds, expenses);
-  let balances = computeNetBalances(memberIds, gross);
-  balances = applyPaymentsToBalances(balances, payments);
-
-  for (const memberId of Object.keys(balances)) {
-    balances[memberId] = roundVnd(balances[memberId]);
-  }
-
-  return settleDebts(balances).map((item) => ({
-    fromId: item.fromId || item.from || item.debtorId,
-    toId: item.toId || item.to || item.creditorId,
-    amount: Number(item.amount || item.amt || 0),
-  }));
 }
 
 function sumAmount(items = []) {
@@ -117,7 +82,7 @@ function listHistoricalPeriods(expenses = [], payments = [], period) {
   return [...months].sort();
 }
 
-function buildPreviousDebtTimeline(memberIds, expenses = [], payments = [], period) {
+function buildPreviousDebtTimeline(expenses = [], payments = [], period) {
   const months = listHistoricalPeriods(expenses, payments, period);
   const timeline = [];
   let cumulativeExpenses = [];
@@ -134,11 +99,11 @@ function buildPreviousDebtTimeline(memberIds, expenses = [], payments = [], peri
     cumulativeExpenses = cumulativeExpenses.concat(monthExpenses);
     cumulativePayments = cumulativePayments.concat(monthPayments);
 
-    const carryPlan = computeSettlementPlan(
-      memberIds,
-      cumulativeExpenses,
-      cumulativePayments,
-    );
+    const carryPlan = buildMonthlySettlementView({
+      roster: ROSTER,
+      expenses: cumulativeExpenses,
+      payments: cumulativePayments,
+    }).settlementPlan;
 
     timeline.push({
       period: monthKey,
@@ -534,7 +499,6 @@ function renderLoading(period) {
 
 export function renderDashboardPage() {
   const app = document.querySelector("#app");
-  const memberIds = ROSTER.map((member) => member.id);
   const myMemberId = getMyMemberId();
   const currentUserLabel = getCurrentUserLabel(state);
 
@@ -607,24 +571,24 @@ export function renderDashboardPage() {
       (sum, item) => sum + Number(item.amount || 0),
       0,
     );
-    const settlementPlan = computeSettlementPlan(
-      memberIds,
-      liveExpenses,
-      livePayments,
-    );
+    const monthlySettlementView = buildMonthlySettlementView({
+      roster: ROSTER,
+      expenses: liveExpenses,
+      payments: livePayments,
+    });
+    const settlementPlan = monthlySettlementView.settlementPlan;
     const { start } = getMonthRange(period);
     const previousDebtSettlementPlan =
       allTimeExpensesReady && allTimePaymentsReady
-        ? computeSettlementPlan(
-            memberIds,
-            allTimeExpenses.filter((item) => String(item.date || "") < start),
-            allTimePayments.filter((item) => String(item.date || "") < start),
-          )
+        ? buildMonthlySettlementView({
+            roster: ROSTER,
+            expenses: allTimeExpenses.filter((item) => String(item.date || "") < start),
+            payments: allTimePayments.filter((item) => String(item.date || "") < start),
+          }).settlementPlan
         : null;
     const previousDebtTimeline =
       allTimeExpensesReady && allTimePaymentsReady
         ? buildPreviousDebtTimeline(
-            memberIds,
             allTimeExpenses,
             allTimePayments,
             period,
