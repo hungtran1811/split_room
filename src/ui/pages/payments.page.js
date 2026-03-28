@@ -139,6 +139,10 @@ function collectPreviousPeriodKeys(allExpenses, allPayments, period) {
   return [...keys].sort();
 }
 
+function settlementPairKey(item) {
+  return `${item?.fromId || ""}|${item?.toId || ""}`;
+}
+
 function buildPreviousDebtByMonth(allExpenses, allPayments, period) {
   const keys = collectPreviousPeriodKeys(allExpenses, allPayments, period);
   const timeline = [];
@@ -166,12 +170,56 @@ function buildPreviousDebtByMonth(allExpenses, allPayments, period) {
         monthPaymentTotal: sumAmount(payments),
         carryTotal: sumAmount(endOfMonthSettlement.settlementPlan),
         carryCount: endOfMonthSettlement.settlementPlan.length,
-        carryPlan: endOfMonthSettlement.settlementPlan,
+        carryPlan: endOfMonthSettlement.settlementPlan.map((item) => ({
+          ...item,
+          amount: payableSettlementAmount(item.amount),
+        })),
       });
     }
   }
 
-  return timeline;
+  const previousExpenses = filterBeforeMonth(allExpenses, period);
+  const previousPayments = filterBeforeMonth(allPayments, period);
+  const remainingPreviousPlan = buildMonthlySettlementView({
+    roster: ROSTER,
+    expenses: previousExpenses,
+    payments: previousPayments,
+  }).settlementPlan;
+  const remainingByPair = new Map(
+    remainingPreviousPlan.map((item) => [
+      settlementPairKey(item),
+      payableSettlementAmount(item.amount),
+    ]),
+  );
+
+  return timeline
+    .map((entry) => {
+      const carryPlan = [];
+
+      for (const item of entry.carryPlan) {
+        const pairKey = settlementPairKey(item);
+        const available = remainingByPair.get(pairKey) || 0;
+        const amount = Math.min(available, payableSettlementAmount(item.amount));
+
+        if (amount > 0) {
+          carryPlan.push({
+            ...item,
+            amount,
+          });
+          remainingByPair.set(pairKey, available - amount);
+        }
+      }
+
+      if (!carryPlan.length) return null;
+
+      return {
+        ...entry,
+        carryPlan,
+        carryTotal: sumAmount(carryPlan),
+        carryCount: carryPlan.length,
+      };
+    })
+    .filter(Boolean);
 }
 
 function paymentSummary(expenses, payments, settlementPlan, previousPlan) {

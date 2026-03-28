@@ -18,5 +18,5 @@ export function parseVndInput(value) {
   }
 
   const parsed = Number(normalized);
-  return Number.isFinite(parsed) ? parsed : 0;
+  return Number.isFinite(parsed) ? Math.round(parsed) : 0;
 }
