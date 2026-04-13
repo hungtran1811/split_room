@@ -642,8 +642,6 @@ function renderVerificationAuditPanels(period, expenses, payments, settlement) {
   }
 
   return `
-    ${renderVerificationSummary(settlement)}
-
     <section class="card">
       <div class="card-body section-card__body">
         ${renderSectionHeader({
@@ -656,42 +654,6 @@ function renderVerificationAuditPanels(period, expenses, payments, settlement) {
           formatAmount: formatPaymentVND,
           title: "Ma trận nợ gốc từ chi tiêu",
         })}
-      </div>
-    </section>
-
-    <section class="card">
-      <div class="card-body section-card__body">
-        ${renderSectionHeader({
-          title: "Payment đã áp trong tháng",
-          subtitle:
-            "Các giao dịch thanh toán được trích vào đối chiếu của riêng tháng đang xem.",
-        })}
-        ${renderAppliedPaymentsList(payments)}
-      </div>
-    </section>
-
-    <section class="card">
-      <div class="card-body section-card__body">
-        ${renderSectionHeader({
-          title: "Số dư sau khi áp payment",
-          subtitle:
-            "Số dư của riêng tháng này sau khi đã trừ các payment ghi nhận trong tháng.",
-        })}
-        ${renderBalancesList(settlement.balances)}
-      </div>
-    </section>
-
-    <section class="card">
-      <div class="card-body section-card__body">
-        ${renderSectionHeader({
-          title: "Cấn trừ còn lại của tháng",
-          subtitle:
-            "Đây là các dòng thanh toán còn lại sau khi đã trừ toàn bộ payment trong tháng.",
-        })}
-        ${renderReadonlySettlementList(
-          settlement.settlementPlan,
-          "Nếu chỉ tính riêng tháng đang xem, các khoản nợ đã được cân bằng.",
-        )}
       </div>
     </section>
   `;

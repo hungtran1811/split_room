@@ -20,7 +20,10 @@ import {
   removeExpense,
   updateExpense,
 } from "../../services/expense.service";
-import { watchMonthExpenses } from "../../services/month-ops.service";
+import {
+  getMonthRange,
+  watchMonthExpenses,
+} from "../../services/month-ops.service";
 import { renderMoneyStatCard } from "../components/moneyStatCard";
 import { renderSectionHeader } from "../components/sectionHeader";
 import {
@@ -51,6 +54,13 @@ function expenseDateForPeriod(period) {
   return `${year}-${String(month).padStart(2, "0")}-${day}`;
 }
 
+function lastDayOfPeriod(period) {
+  const [year, month] = String(period || "").split("-").map(Number);
+  if (!year || !month) return todayYmd();
+  const day = String(new Date(year, month, 0).getDate()).padStart(2, "0");
+  return `${year}-${String(month).padStart(2, "0")}-${day}`;
+}
+
 function creatorLabel(uid) {
   if (!uid) return "-";
 
@@ -77,15 +87,24 @@ function groupExpensesByDate(expenses) {
   }));
 }
 
-function renderExpenseSummary(expenses) {
+function filterExpensesByDate(expenses, selectedExpenseDate) {
+  if (!selectedExpenseDate) return expenses;
+  return (expenses || []).filter((expense) => expense.date === selectedExpenseDate);
+}
+
+function renderExpenseSummary(expenses, selectedExpenseDate) {
   const total = expenses.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+  const label = selectedExpenseDate ? "Tổng chi ngày đang lọc" : "Tổng chi trong tháng";
+  const hint = selectedExpenseDate
+    ? `${expenses.length} khoản chi trong ngày ${selectedExpenseDate}`
+    : `${expenses.length} khoản chi`;
 
   return `
     <section class="money-grid">
       ${renderMoneyStatCard({
-        label: "Tổng chi trong tháng",
+        label,
         value: formatVND(total),
-        hint: `${expenses.length} khoản chi`,
+        hint,
         tone: total > 0 ? "warning" : "neutral",
       })}
     </section>
@@ -101,12 +120,49 @@ export async function renderExpensesPage() {
   const composerOpenByDefault = window.matchMedia("(min-width: 992px)").matches;
   const currentUserLabel = getCurrentUserLabel(state);
   let selectedPeriod = getSelectedPeriod();
+  let selectedExpenseDate = "";
   let expenseListOpen = false;
   let unsubscribeExpenses = null;
   let liveExpenses = [];
 
   function setMessage(text = "") {
     byId("msg").textContent = text;
+  }
+
+  function visibleExpenses() {
+    return filterExpensesByDate(liveExpenses, selectedExpenseDate);
+  }
+
+  function syncExpenseView() {
+    const expenses = visibleExpenses();
+    renderExpensesList(expenses);
+
+    const summaryEl = byId("expensesSummary");
+    if (summaryEl) {
+      summaryEl.innerHTML = renderExpenseSummary(expenses, selectedExpenseDate);
+    }
+
+    const countEl = byId("expensesCount");
+    if (countEl) {
+      countEl.textContent = `${expenses.length} khoản`;
+    }
+
+    const filterMetaEl = byId("expenseDateFilterMeta");
+    if (filterMetaEl) {
+      filterMetaEl.textContent = selectedExpenseDate
+        ? `Đang chỉ xem chi tiêu ngày ${selectedExpenseDate}.`
+        : `Mặc định đang xem toàn bộ chi tiêu trong ${selectedPeriod}.`;
+    }
+
+    const filterInputEl = byId("expenseDateFilter");
+    if (filterInputEl) {
+      filterInputEl.value = selectedExpenseDate;
+    }
+
+    const resetButtonEl = byId("btnResetExpenseDateFilter");
+    if (resetButtonEl) {
+      resetButtonEl.disabled = !selectedExpenseDate;
+    }
   }
 
   function getParticipantIds() {
@@ -260,9 +316,17 @@ export async function renderExpensesPage() {
     if (!expenses.length) {
       wrap.innerHTML = `
         <div class="empty-state">
-          <div class="empty-state__title">Chưa có khoản chi nào</div>
+          <div class="empty-state__title">${
+            selectedExpenseDate
+              ? "Chưa có khoản chi nào trong ngày đã chọn"
+              : "Chưa có khoản chi nào"
+          }</div>
           <div class="empty-state__text">
-            Hãy thêm khoản chi đầu tiên cho tháng ${selectedPeriod}.
+            ${
+              selectedExpenseDate
+                ? `Không có khoản chi nào vào ${selectedExpenseDate}. Bạn có thể đổi ngày lọc hoặc quay lại xem toàn tháng.`
+                : `Hãy thêm khoản chi đầu tiên cho tháng ${selectedPeriod}.`
+            }
           </div>
         </div>
       `;
@@ -389,8 +453,47 @@ export async function renderExpensesPage() {
         '<button id="btnOpenComposer" class="btn ui-action-pill ui-action-pill--primary" type="button">Thêm khoản chi</button>',
       content: `
         <div id="expensesSummary">
-          ${renderExpenseSummary(liveExpenses)}
+          ${renderExpenseSummary(visibleExpenses(), selectedExpenseDate)}
         </div>
+
+        <section class="card section-card">
+          <div class="card-body section-card__body">
+            ${renderSectionHeader({
+              title: "Lọc theo ngày",
+              subtitle: "Mặc định xem toàn bộ chi tiêu trong tháng, chỉ lọc khi bạn cần soi một ngày cụ thể.",
+            })}
+            <div class="row g-3 align-items-end">
+              <div class="col-md-4">
+                <label class="form-label">Chỉ xem 1 ngày</label>
+                <input
+                  id="expenseDateFilter"
+                  type="date"
+                  class="form-control"
+                  value="${selectedExpenseDate}"
+                  min="${getMonthRange(selectedPeriod).start}"
+                  max="${lastDayOfPeriod(selectedPeriod)}"
+                />
+              </div>
+              <div class="col-md-auto">
+                <button
+                  id="btnResetExpenseDateFilter"
+                  class="btn ui-action-pill ui-action-pill--secondary"
+                  type="button"
+                  ${selectedExpenseDate ? "" : "disabled"}
+                >
+                  Xem toàn tháng
+                </button>
+              </div>
+            </div>
+            <div id="expenseDateFilterMeta" class="form-text mt-3">
+              ${
+                selectedExpenseDate
+                  ? `Đang chỉ xem chi tiêu ngày ${selectedExpenseDate}.`
+                  : `Mặc định đang xem toàn bộ chi tiêu trong ${selectedPeriod}.`
+              }
+            </div>
+          </div>
+        </section>
 
         <details class="card section-card" id="expenseComposer" ${composerOpenByDefault ? "open" : ""}>
           <summary class="card-header">Thêm khoản chi</summary>
@@ -403,8 +506,8 @@ export async function renderExpensesPage() {
 
               <div class="col-md-4">
                 <label class="form-label">Số tiền (VNĐ)</label>
-                <input id="exAmount" class="form-control" placeholder="VD: 10000 hoặc 10.000,5"/>
-                <div class="form-text">Có thể nhập số lẻ nếu cần.</div>
+                <input id="exAmount" class="form-control" placeholder="VD: 10000 hoặc 10.000"/>
+                <div class="form-text">Chỉ nhập số nguyên VND.</div>
               </div>
 
               <div class="col-md-4">
@@ -530,6 +633,16 @@ export async function renderExpensesPage() {
       composer.scrollIntoView({ behavior: "smooth", block: "start" });
     });
 
+    byId("expenseDateFilter")?.addEventListener("change", (event) => {
+      selectedExpenseDate = event.target.value || "";
+      syncExpenseView();
+    });
+
+    byId("btnResetExpenseDateFilter")?.addEventListener("click", () => {
+      selectedExpenseDate = "";
+      syncExpenseView();
+    });
+
     byId("exPayer").addEventListener("change", renderDebtsInputs);
     byId("exAmount").addEventListener("input", () => {
       if (byId("exEqual").checked) {
@@ -565,9 +678,7 @@ export async function renderExpensesPage() {
     unsubscribeExpenses?.();
     unsubscribeExpenses = watchMonthExpenses(groupId, selectedPeriod, (items) => {
       liveExpenses = items;
-      renderExpensesList(items);
-      byId("expensesSummary").innerHTML = renderExpenseSummary(items);
-      byId("expensesCount").textContent = `${items.length} khoản`;
+      syncExpenseView();
     });
   }
 
@@ -576,19 +687,20 @@ export async function renderExpensesPage() {
   syncParticipantChips();
   renderDebtsInputs();
   byId("exDate").value = expenseDateForPeriod(selectedPeriod);
-  renderExpensesList([]);
+  syncExpenseView();
   startWatch();
 
   const unsubscribeSelectedPeriod = subscribeSelectedPeriod((nextPeriod) => {
     if (nextPeriod === selectedPeriod) return;
     selectedPeriod = nextPeriod;
+    selectedExpenseDate = "";
     liveExpenses = [];
     renderPage();
     bindEvents();
     syncParticipantChips();
     renderDebtsInputs();
     byId("exDate").value = expenseDateForPeriod(selectedPeriod);
-    renderExpensesList(liveExpenses);
+    syncExpenseView();
     startWatch();
   });
 
