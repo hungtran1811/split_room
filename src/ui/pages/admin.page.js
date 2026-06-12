@@ -10,8 +10,12 @@ import { EMAIL_TO_MEMBER_ID } from "../../config/members.map";
 import { mapFirestoreError } from "../../core/errors";
 import { showToast } from "../components/toast";
 import { openConfirmModal } from "../components/confirmModal";
-import { renderAuthShell, renderAppShell } from "../layout/app-shell";
-import { mountPrimaryNav, unmountPrimaryNav } from "../layout/navbar";
+import { renderAuthScreen } from "../components/authScreen";
+import { mountAuthenticatedPage } from "../layout/page-mount";
+import { getAppRoot } from "../layout/shell-controller";
+import { unmountPrimaryNav } from "../layout/navbar";
+import { renderSkeletonStatGrid } from "../components/skeletonCard";
+import { renderSkeletonList } from "../components/skeletonList";
 import {
   demoteBackupAdmin,
   getAdminOverview,
@@ -189,21 +193,22 @@ function renderMembersTable(members, actionPending) {
 export async function renderAdminPage() {
   if (!state.user || !state.groupId) return;
 
-  const app = document.querySelector("#app");
+  const app = getAppRoot();
 
   if (!state.isOwner) {
     unmountPrimaryNav();
-    app.innerHTML = renderAuthShell({
-      title: "Quản trị nhóm",
-      subtitle: "403 / Không có quyền truy cập",
+    app.innerHTML = renderAuthScreen({
+      variant: "boot",
       content: `
-        <div class="alert alert-danger mb-0">
+        <div class="auth-screen__boot-title">Quản trị nhóm</div>
+        <div class="auth-screen__boot-sub">403 / Không có quyền truy cập</div>
+        <div class="alert alert-danger mb-0 mt-3">
           <div class="fw-semibold mb-2">Chỉ admin chính mới được vào trang quản trị.</div>
           <div class="small mb-3">
             Bạn vẫn có thể quay về dashboard hoặc tiếp tục xem báo cáo của nhóm.
           </div>
           <div class="d-flex gap-2">
-            <a class="btn ui-action-pill ui-action-pill--primary" href="#/dashboard">Về Dashboard</a>
+            <a class="btn ui-action-pill ui-action-pill--primary" href="#/dashboard">Về Tổng quan</a>
             <a class="btn ui-action-pill ui-action-pill--secondary" href="#/reports">Báo cáo</a>
           </div>
         </div>
@@ -222,34 +227,15 @@ export async function renderAdminPage() {
   let selectedPeriod = getSelectedPeriod();
 
   function render() {
-    app.innerHTML = renderAppShell({
+    mountAuthenticatedPage({
       pageId: "admin",
-      title: "Quản trị nhóm",
+      title: "Quản trị",
       subtitle: "Quyền thành viên và sức khỏe dữ liệu",
-      meta: [
-        `Đăng nhập: ${getCurrentUserLabel(state)}`,
-        `Nhóm: ${state.groupId}`,
-        `Tháng đang xem: ${selectedPeriod}`,
-      ],
+      meta: [getCurrentUserLabel(state), `Tháng ${selectedPeriod}`],
       content: `
-        <div class="info-banner">
-          <span class="fw-semibold">Allowlist và email map vẫn đang quản lý ngoài app</span>
-          <span>Hiện có ${Object.keys(EMAIL_TO_MEMBER_ID).length} mapping email -> memberId được hard-code trong cấu hình.</span>
-        </div>
-
         ${
           loading
-            ? `
-              <section class="card section-card">
-                <div class="card-body d-flex align-items-center gap-3">
-                  <div class="spinner-border" role="status" aria-label="Loading"></div>
-                  <div>
-                    <div class="fw-semibold">Đang tải dữ liệu quản trị...</div>
-                    <div class="text-secondary small">Vui lòng chờ trong giây lát</div>
-                  </div>
-                </div>
-              </section>
-            `
+            ? `${renderSkeletonStatGrid({ count: 4 })}${renderSkeletonList({ count: 2 })}`
             : errorMessage
               ? `
                 <div class="alert alert-danger mb-0">
@@ -264,19 +250,16 @@ export async function renderAdminPage() {
               `
         }
       `,
-    });
-
-    mountPrimaryNav({
-      active: "admin",
-      isOwner: state.isOwner,
-      includeLogout: true,
-      onLogout: async () => {
-        await logout();
+      nav: {
+        active: "admin",
+        isOwner: state.isOwner,
+        includeLogout: true,
+        onLogout: async () => logout(),
+        userLabel: getCurrentUserLabel(state),
       },
-      userLabel: getCurrentUserLabel(state),
     });
 
-    app.querySelectorAll("[data-action='promote']").forEach((button) => {
+    getAppRoot().querySelectorAll("[data-action='promote']").forEach((button) => {
       button.addEventListener("click", () => {
         const member = members.find((item) => item.uid === button.dataset.uid);
         if (!member) return;
@@ -301,7 +284,7 @@ export async function renderAdminPage() {
       });
     });
 
-    app.querySelectorAll("[data-action='demote']").forEach((button) => {
+    getAppRoot().querySelectorAll("[data-action='demote']").forEach((button) => {
       button.addEventListener("click", () => {
         const member = members.find((item) => item.uid === button.dataset.uid);
         if (!member) return;

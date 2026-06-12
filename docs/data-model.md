@@ -53,6 +53,37 @@ Fields:
 - `createdAt`
 - `updatedAt`
 
+## Expense
+
+Path: `groups/{groupId}/expenses/{expenseId}`
+
+Fields:
+
+- `date` (`YYYY-MM-DD`)
+- `amount` (integer VND)
+- `payerId` (member id)
+- `participants` (array of member ids)
+- `debts` (map memberId -> amount owed to payer)
+- `note`
+- `createdBy`
+- `createdAt`
+- `updatedAt`
+
+## Payment
+
+Path: `groups/{groupId}/payments/{paymentId}`
+
+Fields:
+
+- `date` (`YYYY-MM-DD`)
+- `amount` (integer VND)
+- `fromId` (debtor member id)
+- `toId` (creditor member id)
+- `note`
+- `createdBy`
+- `createdAt`
+- `updatedAt`
+
 ## Period Snapshot
 
 Path: `groups/{groupId}/periods/{period}`

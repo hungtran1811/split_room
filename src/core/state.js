@@ -74,8 +74,9 @@ function bindStorageListener() {
 }
 
 export function initSelectedPeriod() {
-  state.selectedPeriod = readStoredPeriod();
+  state.selectedPeriod = currentPeriod();
   bindStorageListener();
+  persistSelectedPeriod(state.selectedPeriod);
 }
 
 export function getSelectedPeriod() {
@@ -88,7 +89,7 @@ export function getSelectedPeriod() {
 
 export function setSelectedPeriod(
   period,
-  { persist = true, emit = true } = {},
+  { persist = false, emit = true } = {},
 ) {
   const nextPeriod = normalizePeriod(period);
   const changed = nextPeriod !== state.selectedPeriod;

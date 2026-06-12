@@ -1,64 +1,65 @@
-export function renderFilterBar({
-  fields = "",
-  actions = "",
-  className = "",
-} = {}) {
-  return `
-    <section class="page-filter ${className || ""}">
-      <div class="page-filter__main">${fields || ""}</div>
-      ${actions ? `<div class="page-filter__side">${actions}</div>` : ""}
-    </section>
-  `;
-}
+import { renderIcon } from "../icons";
 
-export function renderGlobalPeriodBar({
+export function renderCompactPeriodNav({
   period = "",
-  actions = "",
-  label = "Tháng đang xem",
+  locked = false,
   className = "",
 } = {}) {
-  return renderFilterBar({
-    className: `page-filter--global ${className || ""}`.trim(),
-    fields: renderMonthField({
-      id: "globalPeriodPicker",
-      label,
-      value: period,
-      hint: describePeriod(period),
-    }),
-    actions,
-  });
-}
+  const lockBadge = locked
+    ? `<span class="filter-pill filter-pill--success period-pill__lock">Đã chốt</span>`
+    : "";
 
-export function renderMonthField({
-  id,
-  label = "Chọn tháng",
-  value = "",
-  hint = "",
-} = {}) {
   return `
-    <div class="page-filter__field">
-      <label class="form-label small mb-1" for="${id}">${label}</label>
-      <input id="${id}" type="month" class="form-control" value="${value}" />
-      ${hint ? `<div class="page-filter__hint">${hint}</div>` : ""}
+    <div class="period-pill ${className || ""}">
+      <button
+        type="button"
+        class="period-pill__btn"
+        id="globalPeriodPrev"
+        aria-label="Tháng trước"
+      >
+        ${renderIcon("chevronLeft", { className: "icon icon--sm", size: 16 })}
+      </button>
+      <label class="period-pill__chip" for="globalPeriodPicker">
+        <span class="period-pill__label" id="globalPeriodChip">${describePeriodChip(period)}</span>
+        <input id="globalPeriodPicker" type="month" class="period-pill__input" value="${period}" />
+      </label>
+      <button
+        type="button"
+        class="period-pill__btn"
+        id="globalPeriodNext"
+        aria-label="Tháng sau"
+      >
+        ${renderIcon("chevronRight", { className: "icon icon--sm", size: 16 })}
+      </button>
+      <button
+        type="button"
+        class="period-pill__today"
+        id="globalPeriodToday"
+        aria-label="Về tháng hiện tại"
+        ${isCurrentPeriodValue(period) ? "disabled" : ""}
+      >
+        Tháng này
+      </button>
+      ${lockBadge}
     </div>
   `;
 }
 
-function describePeriod(period) {
+function describePeriodChip(period) {
   const normalized = String(period || "").trim();
   const match = normalized.match(/^(\d{4})-(\d{2})$/);
-  if (!match) return "";
+  if (!match) return "Chọn tháng";
 
   const year = Number(match[1]);
   const month = Number(match[2]);
-  if (!year || month < 1 || month > 12) return "";
+  if (!year || month < 1 || month > 12) return "Chọn tháng";
 
-  return `Bạn đang xem tháng ${month} năm ${year}`;
+  return `Tháng ${month}/${year}`;
 }
 
-export function renderFilterPill({
-  label,
-  tone = "neutral",
-} = {}) {
-  return `<span class="filter-pill filter-pill--${tone}">${label || ""}</span>`;
+function isCurrentPeriodValue(period) {
+  const normalized = String(period || "").trim();
+  const now = new Date();
+  const current = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  return normalized === current;
 }

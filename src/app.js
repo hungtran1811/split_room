@@ -17,11 +17,13 @@ import { renderLoginPage } from "./ui/pages/login.page";
 import { renderDashboardPage } from "./ui/pages/dashboard.page";
 import { renderExpensesPage } from "./ui/pages/expenses.page";
 import { renderPaymentsPage } from "./ui/pages/payments.page";
-import { renderMatrixPage } from "./ui/pages/matrix.page";
+import { getRoutePath } from "./core/routing";
+import { destroyAppShell } from "./ui/layout/shell-controller";
+import { resetPageMountCache } from "./ui/layout/page-mount";
 import { renderRentPage } from "./ui/pages/rent.page";
 import { renderReportsPage } from "./ui/pages/reports.page";
 import { renderAdminPage } from "./ui/pages/admin.page";
-import { renderAuthShell } from "./ui/layout/app-shell";
+import { renderAuthScreen } from "./ui/components/authScreen";
 import { unmountPrimaryNav } from "./ui/layout/navbar";
 import { ensureDefaultGroup } from "./services/group.service";
 import {
@@ -42,7 +44,20 @@ let unsubMyMemberProfile = null;
 let unsubGroupMembers = null;
 
 function getRoute() {
-  return window.location.hash || "#/dashboard";
+  return getRoutePath(window.location.hash || "#/dashboard");
+}
+
+function redirectMatrixRoute() {
+  const hash = window.location.hash || "";
+  if (!hash.startsWith("#/matrix")) return false;
+
+  const queryIndex = hash.indexOf("?");
+  const query = queryIndex === -1 ? "" : hash.slice(queryIndex);
+  const nextHash = query.includes("tab=")
+    ? `#/payments${query}`
+    : "#/payments?tab=matrix";
+  window.location.replace(nextHash);
+  return true;
 }
 
 function renderBootScreen() {
@@ -51,16 +66,15 @@ function renderBootScreen() {
   unmountPrimaryNav();
 
   if (bootError) {
-    root.innerHTML = renderAuthShell({
-      title: "Split Room",
-      subtitle: "Khởi động ứng dụng",
+    root.innerHTML = renderAuthScreen({
+      variant: "boot",
+      bootTitle: "Không thể tải dữ liệu",
+      bootSubtitle: bootError,
       content: `
-        <div class="alert alert-danger mb-0">
-          <div class="fw-semibold mb-1">Không thể tải dữ liệu</div>
-          <div class="small mb-3">${bootError}</div>
-          <div class="d-flex gap-2">
-            <button class="btn btn-primary" id="btnRetry">Thử lại</button>
-            <button class="btn btn-outline-secondary" id="btnLogout">Đăng xuất</button>
+        <div class="auth-screen__stack">
+          <div class="d-flex gap-2 justify-content-center flex-wrap">
+            <button class="btn btn-primary btn-sm" id="btnRetry">Thử lại</button>
+            <button class="btn btn-outline-secondary btn-sm" id="btnLogout">Đăng xuất</button>
           </div>
         </div>
       `,
@@ -85,18 +99,10 @@ function renderBootScreen() {
   }
 
   if (!redirectResolved || !authReady || bootLoading) {
-    root.innerHTML = renderAuthShell({
-      title: "Split Room",
-      subtitle: "Đang tải dữ liệu",
-      content: `
-        <div class="d-flex align-items-center gap-3">
-          <div class="spinner-border" role="status" aria-label="Loading"></div>
-          <div>
-            <div class="fw-semibold">Đang tải...</div>
-            <div class="text-secondary small">Vui lòng chờ trong giây lát</div>
-          </div>
-        </div>
-      `,
+    root.innerHTML = renderAuthScreen({
+      variant: "boot",
+      bootTitle: "Đang tải...",
+      bootSubtitle: "Vui lòng chờ trong giây lát",
     });
   }
 }
@@ -198,6 +204,8 @@ async function render() {
   if (!state.user) {
     bootLoading = false;
     bootError = null;
+    destroyAppShell();
+    resetPageMountCache();
 
     const initialMessage = pendingLoginMessage;
     pendingLoginMessage = "";
@@ -210,6 +218,10 @@ async function render() {
     return;
   }
 
+  if (redirectMatrixRoute()) {
+    return;
+  }
+
   const route = getRoute();
   if (route.startsWith("#/expenses")) {
     await renderExpensesPage();
@@ -218,11 +230,6 @@ async function render() {
 
   if (route.startsWith("#/payments")) {
     await renderPaymentsPage();
-    return;
-  }
-
-  if (route.startsWith("#/matrix")) {
-    await renderMatrixPage();
     return;
   }
 
@@ -275,8 +282,61 @@ async function initAuthFlow() {
   window.addEventListener("hashchange", () => render());
 }
 
+function ensureOfflineBanner() {
+  let banner = document.getElementById("offlineBanner");
+  if (!banner) {
+    banner = document.createElement("div");
+    banner.id = "offlineBanner";
+    banner.className = "offline-banner";
+    banner.hidden = true;
+    banner.textContent = "Đang offline — chỉ xem dữ liệu đã tải";
+    document.body.prepend(banner);
+  }
+
+  const update = () => {
+    banner.hidden = navigator.onLine;
+  };
+
+  window.addEventListener("online", update);
+  window.addEventListener("offline", update);
+  update();
+}
+
+function registerServiceWorker() {
+  if (import.meta.env.DEV || !("serviceWorker" in navigator)) return;
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js").catch(() => {});
+  });
+}
+
+async function clearDevServiceWorkerCache() {
+  if (!import.meta.env.DEV || !("serviceWorker" in navigator)) return;
+
+  const registrations = await navigator.serviceWorker.getRegistrations();
+  await Promise.all(registrations.map((registration) => registration.unregister()));
+
+  if ("caches" in window) {
+    const keys = await caches.keys();
+    await Promise.all(keys.map((key) => caches.delete(key)));
+  }
+}
+
+function ensureClientMonitoring() {
+  window.addEventListener("error", (event) => {
+    console.error("[splitroom] client error", event.error || event.message);
+  });
+
+  window.addEventListener("unhandledrejection", (event) => {
+    console.error("[splitroom] unhandled rejection", event.reason);
+  });
+}
+
 export function startApp() {
+  ensureClientMonitoring();
   initSelectedPeriod();
+  ensureOfflineBanner();
+  void clearDevServiceWorkerCache();
+  registerServiceWorker();
 
   if (!window.location.hash || window.location.hash === "#") {
     window.location.hash = "#/dashboard";

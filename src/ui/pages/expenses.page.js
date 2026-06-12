@@ -1,9 +1,7 @@
 import { logout } from "../../services/auth.service";
 import {
   getSelectedPeriod,
-  setSelectedPeriod,
   state,
-  subscribeSelectedPeriod,
 } from "../../core/state";
 import { ROSTER, ROSTER_IDS, nameOf } from "../../config/roster";
 import { getCurrentUserLabel, getUserLabel } from "../../core/display-name";
@@ -13,18 +11,26 @@ import { mapFirestoreError } from "../../core/errors";
 import { showToast } from "../components/toast";
 import { openConfirmModal } from "../components/confirmModal";
 import { openExpenseEditModal } from "../components/expenseEditModal";
-import { renderAppShell } from "../layout/app-shell";
-import { mountPrimaryNav } from "../layout/navbar";
+import { EMAIL_TO_MEMBER_ID } from "../../config/members.map";
+import { getMemberPhotoUrl, renderMemberChip } from "../components/memberChip";
+import { getRouteQuery } from "../../core/routing";
+import { mountAuthenticatedPage } from "../layout/page-mount";
+import { getAppRoot } from "../layout/shell-controller";
 import {
   addExpense,
   removeExpense,
   updateExpense,
 } from "../../services/expense.service";
+import { getMonthRange } from "../../services/month-ops.service";
+import { subscribeLiveMonthData } from "../../services/live-data-hub";
+import { renderIconButton, renderListRow } from "../components/listRow";
+import { renderMoneyStatCard } from "../components/metricTile";
 import {
-  getMonthRange,
-  watchMonthExpenses,
-} from "../../services/month-ops.service";
-import { renderMoneyStatCard } from "../components/moneyStatCard";
+  filterExpensesByDate,
+  groupExpensesByDate,
+  renderExpenseSummary,
+} from "../views/expenses.view";
+import { openBottomSheet } from "../components/bottomSheet";
 import { renderSectionHeader } from "../components/sectionHeader";
 import {
   buildWholeEqualShares,
@@ -73,54 +79,30 @@ function creatorLabel(uid) {
   return uid;
 }
 
-function groupExpensesByDate(expenses) {
-  const groups = new Map();
-  for (const expense of expenses) {
-    const key = expense.date || "Không rõ ngày";
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(expense);
-  }
-
-  return [...groups.entries()].map(([date, items]) => ({
-    date,
-    items,
-  }));
-}
-
-function filterExpensesByDate(expenses, selectedExpenseDate) {
-  if (!selectedExpenseDate) return expenses;
-  return (expenses || []).filter((expense) => expense.date === selectedExpenseDate);
-}
-
-function renderExpenseSummary(expenses, selectedExpenseDate) {
-  const total = expenses.reduce((sum, item) => sum + Number(item.amount || 0), 0);
-  const label = selectedExpenseDate ? "Tổng chi ngày đang lọc" : "Tổng chi trong tháng";
-  const hint = selectedExpenseDate
-    ? `${expenses.length} khoản chi trong ngày ${selectedExpenseDate}`
-    : `${expenses.length} khoản chi`;
-
-  return `
-    <section class="money-grid">
-      ${renderMoneyStatCard({
-        label,
-        value: formatVND(total),
-        hint,
-        tone: total > 0 ? "warning" : "neutral",
-      })}
-    </section>
-  `;
+function defaultExpenseDate(period) {
+  const today = todayYmd();
+  if (today.slice(0, 7) === period) return today;
+  return expenseDateForPeriod(period);
 }
 
 export async function renderExpensesPage() {
   if (!state.user || !state.groupId) return;
 
-  const app = document.querySelector("#app");
+  const app = getAppRoot();
+
+  function getMyMemberId() {
+    return (
+      state.memberProfile?.memberId ||
+      EMAIL_TO_MEMBER_ID[state.user?.email || ""] ||
+      ROSTER_IDS[0]
+    );
+  }
   const groupId = state.groupId;
   const canManageEntries = state.canOperateMonth;
   const composerOpenByDefault = window.matchMedia("(min-width: 992px)").matches;
   const currentUserLabel = getCurrentUserLabel(state);
   let selectedPeriod = getSelectedPeriod();
-  let selectedExpenseDate = "";
+  let selectedExpenseDate = getRouteQuery().get("date") || "";
   let expenseListOpen = false;
   let unsubscribeExpenses = null;
   let liveExpenses = [];
@@ -134,34 +116,33 @@ export async function renderExpensesPage() {
   }
 
   function syncExpenseView() {
-    const expenses = visibleExpenses();
-    renderExpensesList(expenses);
+    const filtered = visibleExpenses();
+    renderExpensesList(filtered);
 
     const summaryEl = byId("expensesSummary");
     if (summaryEl) {
-      summaryEl.innerHTML = renderExpenseSummary(expenses, selectedExpenseDate);
+      summaryEl.innerHTML = renderExpenseSummary(
+        liveExpenses,
+        filtered,
+        selectedExpenseDate,
+      );
     }
 
     const countEl = byId("expensesCount");
     if (countEl) {
-      countEl.textContent = `${expenses.length} khoản`;
-    }
-
-    const filterMetaEl = byId("expenseDateFilterMeta");
-    if (filterMetaEl) {
-      filterMetaEl.textContent = selectedExpenseDate
-        ? `Đang chỉ xem chi tiêu ngày ${selectedExpenseDate}.`
-        : `Mặc định đang xem toàn bộ chi tiêu trong ${selectedPeriod}.`;
+      countEl.textContent = selectedExpenseDate
+        ? `${filtered.length} khoản`
+        : "Chưa chọn";
     }
 
     const filterInputEl = byId("expenseDateFilter");
-    if (filterInputEl) {
+    if (filterInputEl && filterInputEl.value !== selectedExpenseDate) {
       filterInputEl.value = selectedExpenseDate;
     }
 
-    const resetButtonEl = byId("btnResetExpenseDateFilter");
-    if (resetButtonEl) {
-      resetButtonEl.disabled = !selectedExpenseDate;
+    const historyPanel = byId("expensesHistory");
+    if (historyPanel && selectedExpenseDate) {
+      historyPanel.open = true;
     }
   }
 
@@ -232,19 +213,21 @@ export async function renderExpensesPage() {
   }
 
   function resetForm() {
-    byId("exDate").value = expenseDateForPeriod(selectedPeriod);
+    byId("exDate").value = defaultExpenseDate(selectedPeriod);
     byId("exAmount").value = "";
     byId("exNote").value = "";
+    byId("exPayer").value = getMyMemberId();
     document.querySelectorAll(".exPart").forEach((checkbox) => {
       checkbox.checked = true;
     });
     byId("exEqual").checked = true;
     setMessage("");
+    syncParticipantChips();
     renderDebtsInputs();
   }
 
   async function saveExpense() {
-    const date = byId("exDate").value || expenseDateForPeriod(selectedPeriod);
+    const date = byId("exDate").value || defaultExpenseDate(selectedPeriod);
     const amount = toWholeVnd(parseVndInput(byId("exAmount").value));
     const payerId = byId("exPayer").value;
     const note = byId("exNote").value.trim();
@@ -313,70 +296,92 @@ export async function renderExpensesPage() {
     const wrap = byId("expensesList");
     if (!wrap) return;
 
-    if (!expenses.length) {
+    if (!selectedExpenseDate) {
       wrap.innerHTML = `
         <div class="empty-state">
-          <div class="empty-state__title">${
-            selectedExpenseDate
-              ? "Chưa có khoản chi nào trong ngày đã chọn"
-              : "Chưa có khoản chi nào"
-          }</div>
+          <div class="empty-state__title">Chọn ngày để xem khoản chi</div>
           <div class="empty-state__text">
-            ${
-              selectedExpenseDate
-                ? `Không có khoản chi nào vào ${selectedExpenseDate}. Bạn có thể đổi ngày lọc hoặc quay lại xem toàn tháng.`
-                : `Hãy thêm khoản chi đầu tiên cho tháng ${selectedPeriod}.`
-            }
+            Dùng bộ lọc phía trên để tìm chi tiêu theo ngày trong tháng ${selectedPeriod}.
           </div>
         </div>
       `;
       return;
     }
 
+    if (!expenses.length) {
+      wrap.innerHTML = `
+        <div class="empty-state">
+          <div class="empty-state__title">Không có khoản chi trong ngày này</div>
+          <div class="empty-state__text">
+            Không có khoản chi nào vào ${selectedExpenseDate}.
+          </div>
+          ${
+            canManageEntries
+              ? '<button type="button" class="btn btn-primary mt-3" id="btnEmptyAddExpense">Thêm chi cho ngày này</button>'
+              : ""
+          }
+        </div>
+      `;
+      return;
+    }
+
+    const today = todayYmd();
     wrap.innerHTML = groupExpensesByDate(expenses)
       .map(
         ({ date, items }) => `
           <section class="expense-day-group">
-            ${renderSectionHeader({
-              title: date,
-              subtitle: `${items.length} khoản chi trong ngày`,
-              className: "expense-day-group__header",
-            })}
-            <div class="expense-day-group__list">
+            <div class="date-group__header">${date} • ${items.length} khoản</div>
+            <div class="stack-list expense-day-group__list">
               ${items
-                .map(
-                  (expense) => `
-                    <article class="action-list__item">
-                      <div class="action-list__head">
-                        <div>
-                          <div class="money-card__value" style="font-size: var(--money-md);">${formatVND(expense.amount)}</div>
-                          <div class="action-list__meta">Người trả: ${nameOf(expense.payerId)}</div>
-                          <div class="action-list__meta">${expense.note || "Không có ghi chú"}</div>
-                          <div class="action-list__meta">
-                            Người tham gia: ${(expense.participants || []).map((memberId) => nameOf(memberId)).join(", ") || "Không có"}
-                          </div>
-                          <div class="action-list__meta">Người tạo: ${creatorLabel(expense.createdBy)}</div>
-                        </div>
-                        ${
-                          canManageEntries
-                            ? `
-                              <div class="d-flex flex-wrap gap-2">
-                                <button class="btn ui-action-pill ui-action-pill--secondary section-cta" data-edit-expense="${expense.id}">Sửa</button>
-                                <button class="btn ui-action-pill ui-action-pill--danger section-cta" data-delete-expense="${expense.id}">Xóa</button>
-                              </div>
-                            `
-                            : ""
-                        }
-                      </div>
-                    </article>
-                  `,
-                )
+                .map((expense) => {
+                  const actions = canManageEntries
+                    ? `
+                      ${renderIconButton({
+                        icon: "edit",
+                        label: "Sửa",
+                        variant: "outline-secondary",
+                        dataAttrs: { "edit-expense": expense.id },
+                      })}
+                      ${renderIconButton({
+                        icon: "trash",
+                        label: "Xóa",
+                        variant: "outline-danger",
+                        dataAttrs: { "delete-expense": expense.id },
+                      })}
+                    `
+                    : "";
+
+                  return renderListRow({
+                    leading: renderMemberChip({
+                      memberId: expense.payerId,
+                      label: nameOf(expense.payerId),
+                      photoURL: getMemberPhotoUrl(expense.payerId, state.members),
+                      size: "sm",
+                    }),
+                    title: nameOf(expense.payerId),
+                    subtitle: expense.note || "Không có ghi chú",
+                    amount: formatVND(expense.amount),
+                    actions,
+                    dataAttrs: { "expense-id": expense.id },
+                  });
+                })
                 .join("")}
             </div>
           </section>
         `,
       )
       .join("");
+
+    wrap.querySelector("#btnEmptyAddExpense")?.addEventListener("click", () => {
+      const composer = byId("expenseComposer");
+      if (composer) {
+        composer.open = true;
+        composer.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+      if (selectedExpenseDate && byId("exDate")) {
+        byId("exDate").value = selectedExpenseDate;
+      }
+    });
 
     if (!canManageEntries) return;
 
@@ -442,29 +447,21 @@ export async function renderExpensesPage() {
   }
 
   function renderPage() {
-    app.innerHTML = renderAppShell({
+    mountAuthenticatedPage({
       pageId: "expenses",
-      title: "Chi tiêu",
-      subtitle: "Theo dõi khoản chi theo tháng",
-      meta: [`Đăng nhập: ${currentUserLabel}`, `Nhóm: ${groupId}`],
-      showPeriodFilter: true,
+      title: "",
+      meta: [],
       period: selectedPeriod,
-      periodActions:
-        '<button id="btnOpenComposer" class="btn ui-action-pill ui-action-pill--primary" type="button">Thêm khoản chi</button>',
       content: `
         <div id="expensesSummary">
-          ${renderExpenseSummary(visibleExpenses(), selectedExpenseDate)}
+          ${renderExpenseSummary(liveExpenses, [], "")}
         </div>
 
-        <section class="card section-card">
+        <section class="card section-card expense-filter">
           <div class="card-body section-card__body">
-            ${renderSectionHeader({
-              title: "Lọc theo ngày",
-              subtitle: "Mặc định xem toàn bộ chi tiêu trong tháng, chỉ lọc khi bạn cần soi một ngày cụ thể.",
-            })}
-            <div class="row g-3 align-items-end">
-              <div class="col-md-4">
-                <label class="form-label">Chỉ xem 1 ngày</label>
+            <div class="expense-filter__row">
+              <div class="expense-filter__field">
+                <label class="form-label" for="expenseDateFilter">Tìm theo ngày</label>
                 <input
                   id="expenseDateFilter"
                   type="date"
@@ -474,23 +471,14 @@ export async function renderExpensesPage() {
                   max="${lastDayOfPeriod(selectedPeriod)}"
                 />
               </div>
-              <div class="col-md-auto">
-                <button
-                  id="btnResetExpenseDateFilter"
-                  class="btn ui-action-pill ui-action-pill--secondary"
-                  type="button"
-                  ${selectedExpenseDate ? "" : "disabled"}
-                >
-                  Xem toàn tháng
+              <div class="expense-filter__actions">
+                <button type="button" class="btn btn-primary" id="btnApplyExpenseDate">
+                  Xem
+                </button>
+                <button type="button" class="btn btn-outline-secondary" id="btnResetExpenseDate" disabled>
+                  Bỏ lọc
                 </button>
               </div>
-            </div>
-            <div id="expenseDateFilterMeta" class="form-text mt-3">
-              ${
-                selectedExpenseDate
-                  ? `Đang chỉ xem chi tiêu ngày ${selectedExpenseDate}.`
-                  : `Mặc định đang xem toàn bộ chi tiêu trong ${selectedPeriod}.`
-              }
             </div>
           </div>
         </section>
@@ -500,8 +488,15 @@ export async function renderExpensesPage() {
           <div class="card-body section-card__body">
             <div class="row g-3">
               <div class="col-md-4">
-                <label class="form-label">Ngày</label>
-                <input id="exDate" type="date" class="form-control" value="${expenseDateForPeriod(selectedPeriod)}"/>
+                <label class="form-label">Ngày ghi chi</label>
+                <input
+                  id="exDate"
+                  type="date"
+                  class="form-control"
+                  value="${defaultExpenseDate(selectedPeriod)}"
+                  min="${getMonthRange(selectedPeriod).start}"
+                  max="${lastDayOfPeriod(selectedPeriod)}"
+                />
               </div>
 
               <div class="col-md-4">
@@ -589,29 +584,35 @@ export async function renderExpensesPage() {
           </div>
         </details>
 
-        <details class="card section-card section-toggle" id="expensesHistory" ${expenseListOpen ? "open" : ""}>
+        <details class="card section-card section-toggle card--compact" id="expensesHistory" ${expenseListOpen ? "open" : ""}>
           <summary class="card-header section-toggle__summary">
-            <div>
-              <div class="section-toggle__title">Danh sách chi tiêu</div>
-              <div class="section-toggle__subtitle">Ẩn mặc định, mở ra khi cần xem lịch sử của tháng đang chọn.</div>
-            </div>
-            <span class="filter-pill filter-pill--neutral" id="expensesCount">${liveExpenses.length} khoản</span>
+            <span>Khoản chi theo ngày</span>
+            <span class="filter-pill filter-pill--neutral" id="expensesCount">Chưa chọn</span>
           </summary>
           <div class="card-body section-card__body">
             <div id="expensesList"></div>
           </div>
         </details>
-      `,
-    });
 
-    mountPrimaryNav({
-      active: "expenses",
-      isOwner: state.isOwner,
-      includeLogout: true,
-      onLogout: async () => {
-        await logout();
+      `,
+      nav: {
+        active: "expenses",
+        isOwner: state.isOwner,
+        includeLogout: true,
+        onLogout: async () => logout(),
+        userLabel: currentUserLabel,
       },
-      userLabel: currentUserLabel,
+      onPeriodChange: (nextPeriod) => {
+        if (nextPeriod === selectedPeriod) return;
+        selectedPeriod = nextPeriod;
+        selectedExpenseDate = "";
+        liveExpenses = [];
+        renderPage();
+        bindEvents();
+        resetForm();
+        syncExpenseView();
+        startWatch();
+      },
     });
   }
 
@@ -623,23 +624,24 @@ export async function renderExpensesPage() {
   }
 
   function bindEvents() {
-    byId("globalPeriodPicker").addEventListener("change", (event) => {
-      setSelectedPeriod(event.target.value);
-    });
-
-    byId("btnOpenComposer").addEventListener("click", () => {
-      const composer = byId("expenseComposer");
-      composer.open = true;
-      composer.scrollIntoView({ behavior: "smooth", block: "start" });
-    });
-
-    byId("expenseDateFilter")?.addEventListener("change", (event) => {
-      selectedExpenseDate = event.target.value || "";
+    byId("btnApplyExpenseDate")?.addEventListener("click", () => {
+      selectedExpenseDate = byId("expenseDateFilter")?.value || "";
       syncExpenseView();
+      byId("btnResetExpenseDate").disabled = !selectedExpenseDate;
     });
 
-    byId("btnResetExpenseDateFilter")?.addEventListener("click", () => {
+    byId("expenseDateFilter")?.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        selectedExpenseDate = event.target.value || "";
+        syncExpenseView();
+        byId("btnResetExpenseDate").disabled = !selectedExpenseDate;
+      }
+    });
+
+    byId("btnResetExpenseDate")?.addEventListener("click", () => {
       selectedExpenseDate = "";
+      if (byId("expenseDateFilter")) byId("expenseDateFilter").value = "";
+      byId("btnResetExpenseDate").disabled = true;
       syncExpenseView();
     });
 
@@ -676,38 +678,26 @@ export async function renderExpensesPage() {
 
   function startWatch() {
     unsubscribeExpenses?.();
-    unsubscribeExpenses = watchMonthExpenses(groupId, selectedPeriod, (items) => {
-      liveExpenses = items;
-      syncExpenseView();
+    unsubscribeExpenses = subscribeLiveMonthData({
+      consumerId: "expenses",
+      groupId,
+      period: selectedPeriod,
+      onUpdate: ({ expenses }) => {
+        liveExpenses = expenses;
+        syncExpenseView();
+      },
     });
   }
 
   renderPage();
   bindEvents();
-  syncParticipantChips();
-  renderDebtsInputs();
-  byId("exDate").value = expenseDateForPeriod(selectedPeriod);
+  resetForm();
   syncExpenseView();
   startWatch();
-
-  const unsubscribeSelectedPeriod = subscribeSelectedPeriod((nextPeriod) => {
-    if (nextPeriod === selectedPeriod) return;
-    selectedPeriod = nextPeriod;
-    selectedExpenseDate = "";
-    liveExpenses = [];
-    renderPage();
-    bindEvents();
-    syncParticipantChips();
-    renderDebtsInputs();
-    byId("exDate").value = expenseDateForPeriod(selectedPeriod);
-    syncExpenseView();
-    startWatch();
-  });
 
   const onHashChange = () => {
     if (!location.hash.startsWith("#/expenses")) {
       unsubscribeExpenses?.();
-      unsubscribeSelectedPeriod();
       window.removeEventListener("hashchange", onHashChange);
     }
   };

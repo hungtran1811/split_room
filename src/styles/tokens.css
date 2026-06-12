@@ -1,0 +1,54 @@
+:root {
+  --surface-0: #e8edf8;
+  --surface-1: #ffffff;
+  --surface-2: #f5f8ff;
+  --ink: #0c1222;
+  --ink-muted: #5b6b82;
+  --accent: #2563eb;
+  --accent-2: #6366f1;
+  --accent-soft: #e0eaff;
+  --accent-glow: linear-gradient(135deg, #1e40af 0%, #2563eb 45%, #6366f1 100%);
+  --hero-debt: linear-gradient(135deg, #991b1b 0%, #dc2626 55%, #f87171 100%);
+  --hero-pending: linear-gradient(135deg, #b45309 0%, #f59e0b 55%, #fcd34d 100%);
+  --hero-settled: linear-gradient(135deg, #1e3a8a 0%, #2563eb 50%, #818cf8 100%);
+  --elev-1: 0 4px 20px rgba(12, 18, 34, 0.07);
+  --elev-2: 0 20px 50px rgba(12, 18, 34, 0.14);
+  --glass-bg: rgba(255, 255, 255, 0.9);
+  --glass-border: rgba(226, 232, 240, 0.9);
+  --glass-blur: blur(14px);
+
+  --header-height: 60px;
+  --nav-height: 72px;
+  --fab-size: 56px;
+  --touch-min: 44px;
+  --radius-sm: 14px;
+  --radius-md: 18px;
+  --radius-lg: 24px;
+  --radius-pill: 999px;
+  --shell-max-width: 1180px;
+  --safe-bottom: max(env(safe-area-inset-bottom, 0px), 8px);
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 32px;
+
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 0.95rem;
+  --text-lg: 1.15rem;
+  --text-xl: 1.4rem;
+  --text-2xl: 1.75rem;
+
+  --success: #059669;
+  --success-soft: #d1fae5;
+  --warning: #d97706;
+  --warning-soft: #fef3c7;
+  --danger: #dc2626;
+  --danger-soft: #fee2e2;
+  --border: #d8e0ef;
+  --border-strong: #b8c5dc;
+}

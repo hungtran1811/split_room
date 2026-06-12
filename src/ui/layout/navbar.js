@@ -3,23 +3,27 @@ import {
   renderMobileProfileButton,
   renderMobileProfileSheet,
 } from "../components/profileMenu";
+import { getNavIcon, renderIcon } from "../icons";
 
 const CORE_ITEMS = [
-  { id: "dashboard", label: "Dashboard", href: "#/dashboard" },
-  { id: "expenses", label: "Chi tiêu", href: "#/expenses" },
-  { id: "payments", label: "Thanh toán", href: "#/payments" },
-  { id: "rent", label: "Tiền nhà", href: "#/rent" },
+  { id: "dashboard", label: "Tổng quan", mobileLabel: "Tổng quan", href: "#/dashboard" },
+  { id: "expenses", label: "Chi tiêu", mobileLabel: "Chi", href: "#/expenses" },
+  { id: "payments", label: "Cấn trừ", mobileLabel: "Cấn trừ", href: "#/payments" },
+  { id: "rent", label: "Tiền nhà", mobileLabel: "Nhà", href: "#/rent" },
+  { id: "reports", label: "Báo cáo", mobileLabel: "Báo cáo", href: "#/reports" },
 ];
 
+const ALL_PRIMARY_ITEMS = CORE_ITEMS;
+
 function resolvePrimary(active) {
-  return CORE_ITEMS.some((item) => item.id === active) ? active : null;
+  return ALL_PRIMARY_ITEMS.some((item) => item.id === active) ? active : null;
 }
 
 function renderDesktopNav(activePrimaryNav) {
   return `
-    <nav class="primary-nav" aria-label="Điều hướng chính">
+    <nav class="primary-nav primary-nav--shell" aria-label="Điều hướng chính">
       <div class="primary-nav__tabs">
-        ${CORE_ITEMS.map((item) => {
+        ${ALL_PRIMARY_ITEMS.map((item) => {
           const activeClass =
             item.id === activePrimaryNav
               ? "primary-nav__item is-active"
@@ -31,7 +35,8 @@ function renderDesktopNav(activePrimaryNav) {
               href="${item.href}"
               ${item.id === activePrimaryNav ? 'aria-current="page"' : ""}
             >
-              ${item.label}
+              ${renderIcon(getNavIcon(item.id), { className: "icon icon--nav", size: 18 })}
+              <span>${item.label}</span>
             </a>
           `;
         }).join("")}
@@ -42,13 +47,13 @@ function renderDesktopNav(activePrimaryNav) {
 
 function renderBottomNav(activePrimaryNav) {
   return `
-    <nav class="app-mobile-nav" aria-label="Điều hướng nhanh">
-      <div class="app-mobile-nav__inner">
+    <nav class="shell-nav" aria-label="Điều hướng nhanh">
+      <div class="shell-nav__inner">
         ${CORE_ITEMS.map((item) => {
           const activeClass =
             item.id === activePrimaryNav
-              ? "app-mobile-nav__link is-active"
-              : "app-mobile-nav__link";
+              ? "shell-nav__item is-active"
+              : "shell-nav__item";
 
           return `
             <a
@@ -56,7 +61,8 @@ function renderBottomNav(activePrimaryNav) {
               href="${item.href}"
               ${item.id === activePrimaryNav ? 'aria-current="page"' : ""}
             >
-              <span>${item.label}</span>
+              ${renderIcon(getNavIcon(item.id), { className: "icon icon--nav", size: 22 })}
+              <span>${item.mobileLabel || item.label}</span>
             </a>
           `;
         }).join("")}
@@ -113,15 +119,18 @@ export function mountPrimaryNav({
   if (!mobileHost) {
     mobileHost = document.createElement("div");
     mobileHost.id = "mobileNavHost";
-    mobileHost.className = "app-shell__mobile-nav-host";
-    document.body.appendChild(mobileHost);
+    mobileHost.className = "shell__nav-host";
+    const shell = document.getElementById("appShell");
+    if (shell) shell.appendChild(mobileHost);
+    else document.body.appendChild(mobileHost);
   }
 
   if (!mobileSheetHost) {
     mobileSheetHost = document.createElement("div");
     mobileSheetHost.id = "mobileNavSheetHost";
-    mobileSheetHost.className = "app-shell__mobile-sheet-host";
-    document.body.appendChild(mobileSheetHost);
+    const shell = document.getElementById("appShell");
+    if (shell) shell.appendChild(mobileSheetHost);
+    else document.body.appendChild(mobileSheetHost);
   }
 
   if (desktopHost) {
@@ -136,7 +145,7 @@ export function mountPrimaryNav({
         includeLogout,
         userLabel,
       })}
-      ${renderMobileProfileButton({ active: profileMenuActive })}
+      ${renderMobileProfileButton({ active: profileMenuActive, userLabel })}
     `;
   }
 

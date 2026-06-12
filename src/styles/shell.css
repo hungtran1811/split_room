@@ -1,0 +1,375 @@
+.shell {
+  min-height: 100vh;
+  padding-bottom: calc(var(--nav-height) + var(--safe-bottom) + var(--space-4));
+  background:
+    radial-gradient(ellipse 90% 60% at 50% -10%, rgba(99, 102, 241, 0.1), transparent),
+    var(--surface-0);
+}
+
+.shell__container {
+  width: min(100%, var(--shell-max-width));
+  margin: 0 auto;
+  padding: 0 var(--space-4);
+}
+
+/* ── Light unified header ── */
+.shell__header {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: var(--header-height);
+  margin: 0 calc(var(--space-4) * -1);
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--border);
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  color: var(--ink);
+}
+
+.shell__brand {
+  display: inline-grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  background: var(--accent-glow);
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  text-decoration: none;
+  flex-shrink: 0;
+  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.3);
+}
+
+.shell__period {
+  display: flex;
+  justify-content: center;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.shell__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+.shell__quick {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.35);
+  transition: transform 0.15s ease;
+}
+
+.shell__quick:hover {
+  transform: scale(1.05);
+}
+
+.shell__main {
+  display: grid;
+  gap: var(--space-4);
+  padding-top: var(--space-5);
+}
+
+.shell__nav-host {
+  position: relative;
+  z-index: 35;
+}
+
+.shell__fab {
+  position: fixed;
+  right: 20px;
+  bottom: calc(var(--nav-height) + var(--safe-bottom) + 12px);
+  z-index: 45;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--fab-size);
+  height: var(--fab-size);
+  border: 0;
+  border-radius: 50%;
+  background: var(--accent-glow);
+  color: #fff;
+  box-shadow: 0 8px 24px rgba(37, 99, 235, 0.4);
+  cursor: pointer;
+}
+
+.shell__desktop-nav {
+  display: none;
+  margin: var(--space-2) 0 0;
+  padding-bottom: var(--space-2);
+}
+
+/* ── Period pill ── */
+.period-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+}
+
+.period-pill__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--surface-1);
+  color: var(--ink-muted);
+  cursor: pointer;
+}
+
+.period-pill__btn:hover:not(:disabled) {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.period-pill__btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.period-pill__chip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  max-width: 170px;
+  padding: 0 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--surface-1);
+  box-shadow: var(--elev-1);
+  cursor: pointer;
+  flex-shrink: 1;
+  min-width: 0;
+}
+
+.period-pill__label {
+  font-size: var(--text-sm);
+  font-weight: 700;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.period-pill__label--current {
+  color: var(--accent);
+}
+
+.period-pill__input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.period-pill__today {
+  display: none;
+  flex-shrink: 0;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--surface-1);
+  color: var(--accent);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.period-pill__today:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ── Bottom nav ── */
+.shell-nav {
+  position: fixed;
+  right: 14px;
+  bottom: 0;
+  left: 14px;
+  z-index: 40;
+  padding-bottom: calc(var(--safe-bottom) + 8px);
+}
+
+.shell-nav__inner {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 4px;
+  padding: 7px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(12px);
+  box-shadow: var(--elev-2);
+}
+
+.shell-nav__item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 54px;
+  padding: 4px 6px;
+  border-radius: var(--radius-md);
+  color: var(--ink-muted);
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 1;
+  text-decoration: none;
+}
+
+.shell-nav__item.is-active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+/* ── Desktop nav ── */
+.primary-nav--shell {
+  display: flex;
+  justify-content: center;
+}
+
+.primary-nav--shell .primary-nav__tabs {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  box-shadow: var(--elev-1);
+}
+
+.primary-nav--shell .primary-nav__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 0 14px;
+  border-radius: var(--radius-pill);
+  color: var(--ink-muted);
+  font-size: var(--text-sm);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.primary-nav--shell .primary-nav__item.is-active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+/* ── Profile ── */
+.profile-avatar {
+  display: inline-grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border: 1.5px solid var(--border);
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 0.72rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.profile-avatar.is-active {
+  border-color: rgba(37, 99, 235, 0.4);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+.profile-menu--shell .profile-menu__trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  height: auto;
+  background: transparent;
+  cursor: pointer;
+  list-style: none;
+}
+
+.profile-menu--shell .profile-menu__trigger::-webkit-details-marker {
+  display: none;
+}
+
+.profile-menu--shell .profile-menu__caret {
+  display: none;
+  color: var(--ink-muted);
+  font-size: 0.7rem;
+}
+
+.shell__actions .profile-menu--desktop {
+  display: none;
+}
+
+.shell__actions .profile-button--mobile {
+  display: inline-flex;
+}
+
+@media (min-width: 992px) {
+  .shell {
+    padding-bottom: var(--space-7);
+  }
+
+  .shell__quick {
+    display: inline-flex;
+  }
+
+  .shell__fab {
+    display: none;
+  }
+
+  .shell__desktop-nav {
+    display: block;
+  }
+
+  .shell-nav {
+    display: none;
+  }
+
+  .shell__actions .profile-menu--desktop {
+    display: block;
+  }
+
+  .shell__actions .profile-button--mobile {
+    display: none;
+  }
+
+  .profile-menu--shell .profile-menu__caret {
+    display: inline;
+  }
+
+  .period-pill__today {
+    display: inline-flex;
+    align-items: center;
+  }
+
+  .period-pill__chip {
+    max-width: 200px;
+  }
+}

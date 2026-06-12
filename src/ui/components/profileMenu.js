@@ -1,3 +1,5 @@
+import { getInitials } from "../icons";
+
 function getProfileItems({ isOwner = false, includeLogout = false } = {}) {
   const items = [{ id: "reports", label: "Báo cáo", href: "#/reports" }];
 
@@ -16,6 +18,15 @@ function isItemActive(itemId, active) {
   return active === itemId;
 }
 
+function renderAvatar(userLabel, { active = false, attrs = "" } = {}) {
+  const initials = getInitials(userLabel);
+  return `
+    <span class="profile-avatar ${active ? "is-active" : ""}" ${attrs}>
+      ${initials}
+    </span>
+  `;
+}
+
 export function renderDesktopProfileMenu({
   active,
   isOwner = false,
@@ -26,9 +37,9 @@ export function renderDesktopProfileMenu({
   const activeMenu = items.some((item) => isItemActive(item.id, active));
 
   return `
-    <details class="profile-menu profile-menu--desktop ${activeMenu ? "is-active" : ""}">
+    <details class="profile-menu profile-menu--desktop profile-menu--shell ${activeMenu ? "is-active" : ""}">
       <summary class="profile-menu__trigger" aria-label="Mở hồ sơ của ${userLabel}">
-        <span class="profile-menu__name">${userLabel}</span>
+        ${renderAvatar(userLabel)}
         <span class="profile-menu__caret" aria-hidden="true">▾</span>
       </summary>
       <div class="profile-menu__panel">
@@ -63,15 +74,18 @@ export function renderDesktopProfileMenu({
   `;
 }
 
-export function renderMobileProfileButton({ active = false } = {}) {
+export function renderMobileProfileButton({
+  active = false,
+  userLabel = "Tài khoản",
+} = {}) {
   return `
     <button
       type="button"
-      class="profile-button profile-button--mobile ${active ? "is-active" : ""}"
+      class="profile-button profile-button--mobile"
       data-profile-sheet-open="true"
       aria-label="Mở hồ sơ"
     >
-      Hồ sơ
+      ${renderAvatar(userLabel, { active })}
     </button>
   `;
 }
@@ -89,9 +103,12 @@ export function renderMobileProfileSheet({
       <button class="profile-sheet__backdrop" type="button" data-profile-sheet-close="true" aria-label="Đóng"></button>
       <div class="profile-sheet__panel" role="dialog" aria-modal="true" aria-labelledby="profileSheetTitle">
         <div class="profile-sheet__header">
-          <div>
-            <div class="profile-sheet__eyebrow">Tài khoản</div>
-            <div class="profile-sheet__title" id="profileSheetTitle">${userLabel}</div>
+          <div class="d-flex align-items-center gap-3">
+            ${renderAvatar(userLabel, { active: true })}
+            <div>
+              <div class="profile-sheet__eyebrow">Tài khoản</div>
+              <div class="profile-sheet__title" id="profileSheetTitle">${userLabel}</div>
+            </div>
           </div>
           <button type="button" class="profile-sheet__close" data-profile-sheet-close="true" aria-label="Đóng">
             Đóng

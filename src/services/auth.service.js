@@ -1,30 +1,19 @@
 import {
   GoogleAuthProvider,
-  createUserWithEmailAndPassword,
   getRedirectResult,
   onAuthStateChanged,
-  signInWithEmailAndPassword,
   signInWithPopup,
   signInWithRedirect,
   signOut,
 } from "firebase/auth";
 import { auth } from "../config/firebase";
+import { disposeLiveDataHub } from "./live-data-hub.js";
 
 const provider = new GoogleAuthProvider();
 provider.setCustomParameters({ prompt: "select_account" });
 
 export function watchAuth(callback) {
   return onAuthStateChanged(auth, callback);
-}
-
-export async function loginWithEmail(email, password) {
-  const cred = await signInWithEmailAndPassword(auth, email, password);
-  return cred.user;
-}
-
-export async function registerWithEmail(email, password) {
-  const cred = await createUserWithEmailAndPassword(auth, email, password);
-  return cred.user;
 }
 
 export async function loginWithGoogle() {
@@ -50,8 +39,6 @@ export async function resolvePendingGoogleRedirect() {
     throw error;
   }
 }
-
-export const handleRedirectResult = resolvePendingGoogleRedirect;
 
 export function getAuthErrorMessage(error) {
   const code = error?.code || "";
@@ -90,5 +77,6 @@ function shouldFallbackToRedirect(error) {
 }
 
 export async function logout() {
+  disposeLiveDataHub();
   await signOut(auth);
 }

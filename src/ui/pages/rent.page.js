@@ -8,9 +8,11 @@ import {
 import { ROSTER_IDS, nameOf } from "../../config/roster";
 import { formatVND } from "../../config/i18n";
 import { showToast } from "../components/toast";
-import { renderAppShell } from "../layout/app-shell";
-import { mountPrimaryNav } from "../layout/navbar";
-import { renderMoneyStatCard } from "../components/moneyStatCard";
+import { getMemberPhotoUrl, renderMemberChip } from "../components/memberChip";
+import { mountAuthenticatedPage } from "../layout/page-mount";
+import { getAppRoot } from "../layout/shell-controller";
+import { renderMetricGrid, renderMoneyStatCard } from "../components/metricTile";
+import { renderRentCollectionRing } from "../views/rent.view";
 import { renderSectionHeader } from "../components/sectionHeader";
 import {
   buildEqualShares,
@@ -63,48 +65,52 @@ function rowInfoHtml(share, due) {
   return `Phải đóng: ${formatVND(share)} • Còn thiếu: <b>${formatVND(due)}</b>`;
 }
 
+function rentStatusChip(share, paidValue) {
+  if (share <= 0) {
+    return '<span class="status-badge status-badge--pending">Chưa nhập</span>';
+  }
+  if (paidValue >= share) {
+    return '<span class="status-badge status-badge--settled">Đã đủ</span>';
+  }
+  return '<span class="status-badge status-badge--debt">Còn thiếu</span>';
+}
+
 export async function renderRentPage() {
   if (!state.user || !state.groupId) return;
 
   const groupId = state.groupId;
   const payerId = "hung";
   const canEdit = state.canOperateMonth;
-  const app = document.querySelector("#app");
+  const app = getAppRoot();
   const currentUserLabel = getCurrentUserLabel(state);
   const initialPeriod = getSelectedPeriod();
+  let period = initialPeriod;
+  let liveDoc = null;
+  let prefilledPeriod = null;
 
-  app.innerHTML = renderAppShell({
+  mountAuthenticatedPage({
     pageId: "rent",
-    title: "Tiền nhà",
-    subtitle: "Theo dõi thu tiền trong tháng",
-    meta: [
-      `Người trả chủ nhà: ${nameOf(payerId)}`,
-      `Đăng nhập: ${currentUserLabel}`,
-      `Nhóm: ${groupId}`,
-    ],
-    showPeriodFilter: true,
+    title: "",
+    meta: [],
     period: initialPeriod,
     content: `
-      <section class="money-grid money-grid--3">
-        ${renderMoneyStatCard({
-          label: "Tổng tiền nhà",
-          value: '<span id="rentTotalStrip">0 đ</span>',
-          tone: "warning",
-          size: "lg",
-        })}
-        ${renderMoneyStatCard({
-          label: "Đã thu",
-          value: '<span id="collectedStrip">0 đ</span>',
-          tone: "positive",
-          size: "lg",
-        })}
-        ${renderMoneyStatCard({
-          label: "Còn thiếu",
-          value: '<span id="totalDueStrip">0 đ</span>',
-          tone: "danger",
-          size: "lg",
-        })}
-      </section>
+      <div id="rentReadonlyBanner" class="readonly-banner" ${canEdit ? 'hidden style="display:none"' : ""}>Chỉ xem</div>
+
+      <div class="d-flex align-items-center gap-3 flex-wrap mb-2">
+        <div id="rentRingHost">
+          ${renderRentCollectionRing()}
+        </div>
+        <div class="flex-grow-1">
+          ${renderMetricGrid(
+            [
+              { label: "Tổng", value: '<span id="rentTotalStrip">0 đ</span>', tone: "warning" },
+              { label: "Đã thu", value: '<span id="collectedStrip">0 đ</span>', tone: "positive" },
+              { label: "Thiếu", value: '<span id="totalDueStrip">0 đ</span>', tone: "danger" },
+            ],
+            { columns: 3 },
+          )}
+        </div>
+      </div>
 
       <div id="rentEditableArea" class="section-stack">
         <section class="card section-card" id="rentFormCard">
@@ -252,24 +258,16 @@ export async function renderRentPage() {
         </div>
       </div>
     `,
-  });
-
-  mountPrimaryNav({
-    active: "rent",
-    isOwner: state.isOwner,
-    includeLogout: true,
-    onLogout: async () => {
-      await logout();
+    nav: {
+      active: "rent",
+      isOwner: state.isOwner,
+      includeLogout: true,
+      onLogout: async () => logout(),
+      userLabel: currentUserLabel,
     },
-    userLabel: currentUserLabel,
   });
 
-  const page = app.querySelector('[data-page="rent"]');
-  const periodPicker = byId("globalPeriodPicker");
-  let period = initialPeriod;
-  let liveDoc = null;
-  let prefilledPeriod = null;
-
+  const page = getAppRoot();
   function setEditable(enabled) {
     page
       .querySelectorAll("#rentEditableArea input, #rentEditableArea button")
@@ -277,13 +275,14 @@ export async function renderRentPage() {
         element.disabled = !enabled;
       });
 
-    if (periodPicker) {
-      periodPicker.disabled = false;
-      periodPicker.value = period;
+    const banner = byId("rentReadonlyBanner");
+    if (banner) {
+      banner.hidden = enabled;
+      banner.style.display = enabled ? "none" : "";
     }
 
     if (!enabled) {
-      byId("rentMsg").textContent = "Chỉ người vận hành tháng mới được sửa tiền nhà.";
+      byId("rentMsg").textContent = "";
       return;
     }
 
@@ -377,13 +376,20 @@ export async function renderRentPage() {
         const due = Math.max(share - paidValue, 0);
 
         return `
-          <div class="col-12 col-md-6 paidRow" data-id="${memberId}">
-            <div class="d-flex justify-content-between">
-              <div class="fw-semibold">${nameOf(memberId)}</div>
-              <div class="text-secondary small paidInfo">${rowInfoHtml(
-                share,
-                due,
-              )}</div>
+          <div class="col-12 col-md-6 paidRow rent-member-row" data-id="${memberId}">
+            <div class="d-flex justify-content-between align-items-start gap-2">
+              ${renderMemberChip({
+                memberId,
+                label: nameOf(memberId),
+                photoURL: getMemberPhotoUrl(memberId, state.members),
+              })}
+              <div class="text-end">
+                ${rentStatusChip(share, paidValue)}
+                <div class="text-secondary small paidInfo mt-2">${rowInfoHtml(
+                  share,
+                  due,
+                )}</div>
+              </div>
             </div>
             <input
               class="form-control paidInput"
@@ -475,6 +481,20 @@ export async function renderRentPage() {
     byId("payerBurden").textContent = formatVND(payerBurden);
     byId("totalDue").textContent = formatVND(totalDue);
     byId("totalDueStrip").textContent = formatVND(totalDue);
+
+    const expectedCollection = ROSTER_IDS.filter(
+      (memberId) => memberId !== payerId,
+    ).reduce(
+      (sum, memberId) => sum + Number(finalShares[memberId] || 0),
+      0,
+    );
+    const ringHost = byId("rentRingHost");
+    if (ringHost) {
+      ringHost.innerHTML = renderRentCollectionRing({
+        collected,
+        expectedCollection,
+      });
+    }
 
     if (rerenderPaid) {
       renderPaidInputs(finalShares, paid);
@@ -697,19 +717,12 @@ export async function renderRentPage() {
     });
   });
 
-  periodPicker?.addEventListener("change", (event) => {
-    setSelectedPeriod(event.target.value);
-  });
-
   startWatch();
 
   const unsubscribeSelectedPeriod = subscribeSelectedPeriod((nextPeriod) => {
     if (nextPeriod === period) return;
     period = nextPeriod;
     prefilledPeriod = null;
-    if (periodPicker && periodPicker.value !== nextPeriod) {
-      periodPicker.value = nextPeriod;
-    }
     startWatch();
   });
 

@@ -1,10 +1,6 @@
 import { logout } from "../../services/auth.service";
-import {
-  getSelectedPeriod,
-  setSelectedPeriod,
-  state,
-  subscribeSelectedPeriod,
-} from "../../core/state";
+import { buildHash } from "../../core/routing";
+import { getSelectedPeriod, state } from "../../core/state";
 import { formatVND } from "../../config/i18n";
 import { ROSTER } from "../../config/roster";
 import { EMAIL_TO_MEMBER_ID } from "../../config/members.map";
@@ -13,21 +9,29 @@ import {
   getMemberLabelById,
 } from "../../core/display-name";
 import {
-  watchExpenses,
-  watchExpensesByRange,
-} from "../../services/expense.service";
-import {
-  watchPayments,
-  watchPaymentsByRange,
-} from "../../services/payment.service";
-import { watchRentByPeriod } from "../../services/rent.service";
+  fetchHistoricalBefore,
+  subscribeLiveMonthData,
+} from "../../services/live-data-hub";
 import { getMonthRange } from "../../services/month-ops.service";
-import { renderAppShell } from "../layout/app-shell";
-import { mountPrimaryNav } from "../layout/navbar";
-import { renderFilterPill } from "../components/filterBar";
-import { renderMoneyStatCard } from "../components/moneyStatCard";
+import { renderBtn, renderBtnGroup } from "../components/actionButton";
+import { renderBalanceHero } from "../components/balanceHero";
+import {
+  buildMemberSummaries,
+  renderMemberSummaries,
+  renderQuickCtaGrid,
+} from "../components/dashOverview";
+import { openOnboardingModal } from "../components/onboardingModal";
+import { renderMetricGrid } from "../components/metricTile";
+import { renderProgressRing } from "../components/progressRing";
+import { buildDailyTotals, renderSparkline } from "../components/sparkline";
 import { renderSectionHeader } from "../components/sectionHeader";
+import { renderDashboardLoading } from "../views/dashboard.view";
+import { renderSkeletonList } from "../components/skeletonList";
 import { buildMonthlySettlementView } from "../../domain/matrix/compute";
+import { mountPage } from "../layout/page-lifecycle";
+import { mountAuthenticatedPage, patchMainContent } from "../layout/page-mount";
+import { getAppRoot, getMainElement } from "../layout/shell-controller";
+import { createRenderScheduler } from "../utils/render-scheduler";
 
 function clampPercent(value) {
   if (!Number.isFinite(value)) return 0;
@@ -157,187 +161,137 @@ function summarizeRentForMember(rentDoc, memberId) {
 }
 
 function renderHeroRow(stats) {
-  return `
-    <section class="money-grid money-grid--4">
-      ${renderMoneyStatCard({
-        label: "Tổng chi",
+  return renderMetricGrid(
+    [
+      {
+        label: "Chi",
         value: formatVND(stats.expenseTotal),
-        hint: `${stats.expenseCount} khoản trong tháng`,
+        href: "#/expenses",
         tone: "neutral",
-        size: "lg",
-      })}
-      ${renderMoneyStatCard({
-        label: "Tổng thanh toán",
+      },
+      {
+        label: "Đã trả",
         value: formatVND(stats.paymentTotal),
-        hint: `${stats.paymentCount} giao dịch đã ghi nhận`,
+        href: buildHash("/payments", { tab: "history" }),
         tone: stats.paymentTotal > 0 ? "positive" : "neutral",
-        size: "lg",
-      })}
-      ${renderMoneyStatCard({
-        label: "Tiền nhà",
+      },
+      {
+        label: "Nhà",
         value: formatVND(stats.rentTotal),
-        hint: stats.rentTotal > 0 ? "Đã có bản ghi tháng này" : "Chưa có bản ghi tiền nhà",
+        href: "#/rent",
         tone: stats.rentTotal > 0 ? "warning" : "neutral",
-        size: "lg",
-      })}
-      ${renderMoneyStatCard({
-        label: "Còn cấn trừ",
-        value: stats.settlementCount ? `${stats.settlementCount} dòng` : "0 dòng",
-        hint: stats.settlementCount ? "Cần xử lý trong tháng" : "Đã cân bằng trong tháng",
+      },
+      {
+        label: "Cấn trừ",
+        value: stats.settlementCount ? `${stats.settlementCount}` : "0",
+        href: buildHash("/payments", { tab: "suggest" }),
         tone: stats.settlementCount ? "danger" : "positive",
-        size: "lg",
-      })}
-    </section>
-  `;
-}
-
-function renderTasks(tasks) {
-  if (!tasks.length) {
-    return `
-      <div class="empty-state">
-        <div class="empty-state__title">Mọi thứ đang ổn</div>
-        <div class="empty-state__text">
-          Tháng này hiện chưa có việc ưu tiên nào cần xử lý ngay.
-        </div>
-      </div>
-    `;
-  }
-
-  return `
-    <div class="action-list">
-      ${tasks
-        .map(
-          (task) => `
-            <article class="action-list__item">
-              <div class="action-list__head">
-                <div>
-                  <div class="action-list__title">${task.title}</div>
-                  <div class="action-list__meta">${task.description}</div>
-                </div>
-                <a class="btn ui-action-pill ui-action-pill--secondary section-cta" href="${task.href}">
-                  ${task.cta}
-                </a>
-              </div>
-            </article>
-          `,
-        )
-        .join("")}
-    </div>
-  `;
+      },
+    ],
+    { columns: 4 },
+  );
 }
 
 function renderRentSection(rentSummary) {
+  const openRent = renderBtn({
+    label: "Mở",
+    href: "#/rent",
+    variant: "outline-secondary",
+    size: "sm",
+  });
+
   if (!rentSummary) {
     return `
-      <section class="card section-card">
-        <div class="card-body section-card__body">
-          ${renderSectionHeader({
-            title: "Tiền nhà tháng này",
-            subtitle: "Theo dõi phần phải đóng và tiến độ thu tiền trong tháng.",
-            action:
-              '<a class="btn ui-action-pill ui-action-pill--secondary section-cta" href="#/rent">Mở tiền nhà</a>',
-          })}
-          <div class="empty-state">
-            <div class="empty-state__title">Chưa có bản ghi tiền nhà</div>
-            <div class="empty-state__text">
-              Tạo tiền nhà tháng này để mọi người nhìn thấy phần cần đóng.
-            </div>
+      <section class="dash-panel">
+        <div class="dash-panel__body">
+          <div class="dash-panel__head">
+            <h3 class="dash-panel__title">Tiền nhà</h3>
+            ${openRent}
           </div>
+          ${renderBtn({ label: "Nhập tiền nhà", href: "#/rent", variant: "primary", size: "sm" })}
         </div>
       </section>
     `;
   }
 
-  if (rentSummary.mode === "payer") {
-    const percent = clampPercent(
-      rentSummary.expectedFromOthers <= 0
-        ? 100
-        : (rentSummary.collectedFromOthers / rentSummary.expectedFromOthers) * 100,
-    );
+  const percent =
+    rentSummary.mode === "payer"
+      ? clampPercent(
+          rentSummary.expectedFromOthers <= 0
+            ? 100
+            : (rentSummary.collectedFromOthers / rentSummary.expectedFromOthers) *
+                100,
+        )
+      : clampPercent(
+          rentSummary.share <= 0
+            ? 100
+            : (rentSummary.alreadyPaid / rentSummary.share) * 100,
+        );
 
-    return `
-      <section class="card section-card">
-        <div class="card-body section-card__body">
-          ${renderSectionHeader({
-            title: "Tiền nhà tháng này",
-            subtitle: "Phần tiền bạn đang đứng và tiến độ thu lại trong tháng.",
-            action:
-              '<a class="btn ui-action-pill ui-action-pill--secondary section-cta" href="#/rent">Mở tiền nhà</a>',
-          })}
-          <div class="money-grid money-grid--3">
-            ${renderMoneyStatCard({
-              label: "Phần của bạn",
-              value: formatVND(rentSummary.myShare),
-              tone: "neutral",
-            })}
-            ${renderMoneyStatCard({
-              label: "Đã thu",
-              value: formatVND(rentSummary.collectedFromOthers),
-              tone: "positive",
-            })}
-            ${renderMoneyStatCard({
-              label: "Còn thiếu",
-              value: formatVND(rentSummary.remaining),
-              tone: rentSummary.remaining > 0 ? "danger" : "positive",
-            })}
-          </div>
-          <div>
-            <div class="d-flex justify-content-between small text-secondary mb-2">
-              <span>Tiến độ thu tiền</span>
-              <span>${Math.round(percent)}%</span>
-            </div>
-            <div class="progress" style="height: 10px;">
-              <div
-                class="progress-bar ${rentSummary.remaining > 0 ? "bg-warning" : "bg-success"}"
-                style="width:${percent}%"
-              ></div>
-            </div>
-          </div>
-        </div>
-      </section>
-    `;
-  }
-
-  const percent = clampPercent(
-    rentSummary.share <= 0 ? 100 : (rentSummary.alreadyPaid / rentSummary.share) * 100,
-  );
-
-  return `
-    <section class="card section-card">
-      <div class="card-body section-card__body">
-        ${renderSectionHeader({
-          title: "Tiền nhà tháng này",
-          subtitle: "Phần tiền nhà của bạn trong tháng hiện tại.",
-          action:
-            '<a class="btn ui-action-pill ui-action-pill--secondary section-cta" href="#/rent">Mở tiền nhà</a>',
-        })}
-        <div class="money-grid money-grid--3">
-          ${renderMoneyStatCard({
-            label: "Bạn cần trả",
-            value: formatVND(rentSummary.share),
-            tone: "warning",
-          })}
-          ${renderMoneyStatCard({
-            label: "Đã chuyển",
-            value: formatVND(rentSummary.alreadyPaid),
+  const cards =
+    rentSummary.mode === "payer"
+      ? [
+          { label: "Bạn", value: formatVND(rentSummary.myShare), tone: "neutral" },
+          {
+            label: "Đã thu",
+            value: formatVND(rentSummary.collectedFromOthers),
             tone: "positive",
-          })}
-          ${renderMoneyStatCard({
-            label: "Còn thiếu",
+          },
+          {
+            label: "Thiếu",
             value: formatVND(rentSummary.remaining),
             tone: rentSummary.remaining > 0 ? "danger" : "positive",
-          })}
+          },
+        ]
+      : [
+          {
+            label: "Cần trả",
+            value: formatVND(rentSummary.share),
+            tone: "warning",
+          },
+          {
+            label: "Đã trả",
+            value: formatVND(rentSummary.alreadyPaid),
+            tone: "positive",
+          },
+          {
+            label: "Thiếu",
+            value: formatVND(rentSummary.remaining),
+            tone: rentSummary.remaining > 0 ? "danger" : "positive",
+          },
+        ];
+
+  const statusLabel =
+    rentSummary.remaining > 0
+      ? `Thiếu ${formatVND(rentSummary.remaining)}`
+      : "Đủ";
+  const statusTone = rentSummary.remaining > 0 ? "warning" : "positive";
+
+  return `
+    <section class="dash-panel rent-status-card">
+      <div class="dash-panel__body">
+        <div class="dash-panel__head rent-status-card__head">
+          <h3 class="dash-panel__title">Tiền nhà</h3>
+          ${openRent}
         </div>
-        <div>
-          <div class="d-flex justify-content-between small text-secondary mb-2">
-            <span>Tiến độ đóng tiền</span>
-            <span>${Math.round(percent)}%</span>
+        <div class="rent-status-card__body">
+          <div class="rent-status-card__ring">
+            ${renderProgressRing({ percent, size: 96, stroke: 9 })}
+            <span class="rent-status-card__badge rent-status-card__badge--${statusTone}">
+              ${statusLabel}
+            </span>
           </div>
-          <div class="progress" style="height: 10px;">
-            <div
-              class="progress-bar ${rentSummary.remaining > 0 ? "bg-danger" : "bg-success"}"
-              style="width:${percent}%"
-            ></div>
+          <div class="rent-status-card__stats">
+            ${cards
+              .map(
+                (card) => `
+                  <div class="rent-status-card__stat rent-status-card__stat--${card.tone || "neutral"}">
+                    <span class="rent-status-card__stat-label">${card.label}</span>
+                    <strong class="rent-status-card__stat-value">${card.value}</strong>
+                  </div>
+                `,
+              )
+              .join("")}
           </div>
         </div>
       </div>
@@ -345,162 +299,116 @@ function renderRentSection(rentSummary) {
   `;
 }
 
-function renderPreviousDebtSection(items, period, timeline = []) {
+function renderPreviousDebtSection(items, timeline = [], loading = false) {
+  if (loading) {
+    return `
+      <details class="dash-panel" id="previousDebtPanel">
+        <summary class="dash-panel__summary">Nợ cũ</summary>
+        <div class="dash-panel__body">${renderSkeletonList({ count: 2 })}</div>
+      </details>
+    `;
+  }
+
+  if (!items.length) return "";
+
   const totalDebt = sumAmount(items);
 
   return `
-    <section class="card section-card">
-      <div class="card-body section-card__body">
-        ${renderSectionHeader({
-          title: "Nợ cũ từ các tháng trước",
-          subtitle: `Các khoản còn treo trước ${period.replace("-", "/")} để cả nhóm không quên xử lý tiếp.`,
-        })}
-        ${
-          items.length
-            ? `
-              <div class="summary-strip">
-                <div class="summary-strip__item">
-                  <span class="summary-strip__label">Tổng nợ chuyển kỳ</span>
-                  <span class="summary-strip__value">${formatVND(totalDebt)}</span>
+    <details class="dash-panel" id="previousDebtPanel">
+      <summary class="dash-panel__summary">
+        <span>Nợ cũ</span>
+        <span class="filter-pill filter-pill--warning">${formatVND(totalDebt)}</span>
+      </summary>
+      <div class="dash-panel__body">
+        <div class="compact-list">
+          ${items
+            .slice(0, 6)
+            .map(
+              (item) => `
+                <div class="compact-list__row">
+                  <span>${nameOf(item.fromId)} → ${nameOf(item.toId)}</span>
+                  <strong>${formatVND(item.amount)}</strong>
                 </div>
-                <div class="summary-strip__item">
-                  <span class="summary-strip__label">Số dòng còn treo</span>
-                  <span class="summary-strip__value">${items.length} dòng</span>
-                </div>
-                <div class="summary-strip__item">
-                  <span class="summary-strip__label">Số tháng có phát sinh</span>
-                  <span class="summary-strip__value">${timeline.length} tháng</span>
-                </div>
-              </div>
-              <div class="action-list">
-                ${items
-                  .slice(0, 4)
-                  .map(
-                    (item) => `
-                      <article class="action-list__item">
-                        <div class="action-list__head">
-                          <div>
-                            <div class="action-list__title">${nameOf(item.fromId)} -> ${nameOf(item.toId)}</div>
-                            <div class="action-list__meta">Còn nợ từ các tháng trước ${formatVND(item.amount)}</div>
-                          </div>
-                        </div>
-                      </article>
-                    `,
-                  )
-                  .join("")}
-              </div>
-              ${
-                timeline.length
-                  ? `
-                    <details class="settlement-explain__events-toggle">
-                      <summary class="settlement-explain__events-summary">
-                        Xem nhanh nợ chuyển theo từng tháng (${timeline.length} tháng)
-                      </summary>
-                      <div class="stack-list p-3 pt-0">
-                        ${timeline
-                          .map(
-                            (entry) => `
-                              <article class="action-list__item">
-                                <div class="action-list__head">
-                                  <div>
-                                    <div class="action-list__title">${formatPeriodLabel(entry.period)}</div>
-                                    <div class="action-list__meta">Chi tiêu: ${formatVND(entry.expenseTotal)} • Thanh toán: ${formatVND(entry.paymentTotal)}</div>
-                                    <div class="action-list__meta">Cuối tháng còn chuyển: ${formatVND(entry.carryTotal)} (${entry.carryCount} dòng)</div>
-                                  </div>
-                                </div>
-                              </article>
-                            `,
-                          )
-                          .join("")}
-                      </div>
-                    </details>
-                  `
-                  : ""
-              }
-            `
-            : `
-              <div class="empty-state">
-                <div class="empty-state__title">Không còn nợ cũ</div>
-                <div class="empty-state__text">
-                  Các khoản phát sinh từ những tháng trước đã được cân bằng.
-                </div>
-              </div>
-            `
-        }
-      </div>
-    </section>
-  `;
-}
-
-function renderSettlementSection(items) {
-  return `
-    <section class="card section-card">
-      <div class="card-body section-card__body">
-        ${renderSectionHeader({
-          title: "Cấn trừ hiện tại",
-          subtitle: "Các khoản còn cần thanh toán trong tháng đang xem sau khi đã áp payment.",
-          action:
-            '<a class="btn ui-action-pill ui-action-pill--secondary section-cta" href="#/payments">Mở thanh toán</a>',
-        })}
-        ${
-          items.length
-            ? `
-              <div class="action-list">
-                ${items
-                  .slice(0, 5)
-                  .map(
-                    (item) => `
-                      <article class="action-list__item">
-                        <div class="action-list__head">
-                          <div>
-                            <div class="action-list__title">${nameOf(item.fromId)} -> ${nameOf(item.toId)}</div>
-                            <div class="action-list__meta">Còn cần thanh toán ${formatVND(item.amount)}</div>
-                          </div>
-                          <button
-                            class="btn ui-action-pill ui-action-pill--secondary section-cta"
-                            data-copy="${item.fromId}|${item.toId}|${item.amount}"
-                          >
-                            Copy
-                          </button>
-                        </div>
-                      </article>
-                    `,
-                  )
-                  .join("")}
-              </div>
-            `
-            : `
-              <div class="empty-state">
-                <div class="empty-state__title">Không còn khoản cấn trừ nào</div>
-                <div class="empty-state__text">Không còn khoản cấn trừ nào trong tháng này.</div>
-              </div>
-            `
-        }
-      </div>
-    </section>
-  `;
-}
-
-function renderLoading(period) {
-  return `
-    <div class="card">
-      <div class="card-body d-flex align-items-center gap-3">
-        <div class="spinner-border" role="status" aria-label="Loading"></div>
-        <div>
-          <div class="fw-semibold">Đang tải dữ liệu tháng ${period}...</div>
-          <div class="text-secondary small">
-            Dữ liệu sẽ tự làm mới khi có thay đổi.
-          </div>
+              `,
+            )
+            .join("")}
         </div>
+        ${
+          timeline.length
+            ? `
+              <details class="mt-2">
+                <summary class="small text-secondary">Theo tháng (${timeline.length})</summary>
+                <div class="compact-list mt-2">
+                  ${timeline
+                    .map(
+                      (entry) => `
+                        <div class="compact-list__row">
+                          <span>${formatPeriodLabel(entry.period)}</span>
+                          <strong>${formatVND(entry.carryTotal)}</strong>
+                        </div>
+                      `,
+                    )
+                    .join("")}
+                </div>
+              </details>
+            `
+            : ""
+        }
+        ${renderBtn({
+          label: "Ghi cấn trừ",
+          href: buildHash("/payments", { tab: "suggest" }),
+          variant: "primary",
+          size: "sm",
+          className: "mt-3",
+        })}
       </div>
-    </div>
+    </details>
   `;
+}
+
+function computePersonalDebt(myMemberId, rentSummary, settlementPlan, hasRentDoc) {
+  let rentDebt = 0;
+  if (rentSummary?.mode === "member") {
+    rentDebt = Math.max(0, Number(rentSummary.remaining || 0));
+  }
+
+  let expenseDebt = 0;
+  for (const item of settlementPlan || []) {
+    if (item.fromId === myMemberId) {
+      expenseDebt += Math.max(0, Number(item.amount || 0));
+    }
+  }
+
+  const total = rentDebt + expenseDebt;
+  const breakdown = [];
+  if (rentDebt > 0) breakdown.push({ label: "Tiền nhà", amount: rentDebt });
+  if (expenseDebt > 0) {
+    breakdown.push({ label: "Chi tiêu chung", amount: expenseDebt });
+  }
+
+  let status = "settled";
+  let statusLabel = "Ổn";
+  if (total > 0) {
+    status = "debt";
+    statusLabel = "Còn nợ";
+  } else if (!hasRentDoc) {
+    status = "pending";
+    statusLabel = "Chưa nhập nhà";
+  }
+
+  return {
+    total,
+    breakdown,
+    status,
+    statusLabel,
+  };
 }
 
 export function renderDashboardPage() {
-  const app = document.querySelector("#app");
+  const app = getAppRoot();
   const myMemberId = getMyMemberId();
   const currentUserLabel = getCurrentUserLabel(state);
+  let onboardingOpened = false;
 
   let period = getSelectedPeriod();
   let liveExpenses = [];
@@ -513,47 +421,60 @@ export function renderDashboardPage() {
   let rentReady = false;
   let allTimeExpensesReady = false;
   let allTimePaymentsReady = false;
-  let unsubscribeExpenses = null;
-  let unsubscribePayments = null;
-  let unsubscribeRent = null;
-  let unsubscribeAllTimeExpenses = null;
-  let unsubscribeAllTimePayments = null;
+  let allTimeLoading = false;
+  let unsubscribeHub = null;
   let disposed = false;
+  let allTimeStarted = false;
+  let shellMounted = false;
 
-  function renderShell(content, periodActions = "") {
-    app.innerHTML = renderAppShell({
+  const { schedule: scheduleRender, dispose: disposeScheduler } =
+    createRenderScheduler(recomputeAndRender);
+
+  function renderShell(content) {
+    mountAuthenticatedPage({
       pageId: "dashboard",
-      title: "Dashboard",
-      subtitle: "Tổng quan tháng hiện tại",
-      meta: [`Đăng nhập: ${currentUserLabel}`, `Nhóm: ${state.groupId}`],
-      showPeriodFilter: true,
+      title: "",
+      meta: [],
       period,
-      periodActions,
-      content,
+      content: `
+        <div class="dash-page">
+          <div id="dashboard-hero">${content.hero || ""}</div>
+          <div id="dashboard-quick">${content.quick || ""}</div>
+          <div id="dashboard-metrics">${content.metrics || ""}</div>
+          <div id="dashboard-members">${content.members || ""}</div>
+          <div id="dashboard-body">${content.body || ""}</div>
+        </div>
+      `,
+      nav: {
+        active: "dashboard",
+        isOwner: state.isOwner,
+        includeLogout: true,
+        onLogout: async () => logout(),
+        userLabel: currentUserLabel,
+      },
+      onPeriodChange: (nextPeriod) => {
+        if (nextPeriod === period) return;
+        reloadPeriod(nextPeriod);
+      },
     });
 
-    mountPrimaryNav({
-      active: "dashboard",
-      isOwner: state.isOwner,
-      includeLogout: true,
-      onLogout: async () => logout(),
-      userLabel: currentUserLabel,
-    });
+    shellMounted = true;
 
-    document
-      .getElementById("globalPeriodPicker")
-      ?.addEventListener("change", (event) => {
-        setSelectedPeriod(event.target.value);
-      });
+    if (!onboardingOpened) {
+      onboardingOpened = true;
+      openOnboardingModal();
+    }
   }
 
   function renderLoadingShell() {
     renderShell(
-      renderLoading(period),
-      renderFilterPill({
-        label: "Đang tải dữ liệu",
-        tone: "neutral",
-      }),
+      {
+        hero: renderDashboardLoading(),
+        quick: "",
+        metrics: "",
+        members: "",
+        body: "",
+      },
     );
   }
 
@@ -608,190 +529,184 @@ export function renderDashboardPage() {
     const tasks = [];
     if (!liveExpenses.length) {
       tasks.push({
-        title: "Tháng này chưa có khoản chi nào",
-        description: "Bắt đầu bằng việc thêm khoản chi đầu tiên để cả nhóm cùng theo dõi.",
         href: "#/expenses",
-        cta: "Thêm chi tiêu",
+        cta: "+ Chi",
       });
     }
     if (!liveRent) {
       tasks.push({
-        title: "Tạo tiền nhà tháng này",
-        description: "Tiền nhà vẫn chưa được nhập nên mọi người chưa thấy phần cần đóng.",
         href: "#/rent",
-        cta: "Nhập tiền nhà",
+        cta: "Nhập nhà",
+        primary: true,
       });
     }
     if (settlementPlan.length > 0) {
       tasks.push({
-        title: "Còn khoản cấn trừ cần xử lý",
-        description: `${settlementPlan.length} dòng cấn trừ vẫn chưa được thanh toán hết.`,
-        href: "#/payments",
-        cta: "Mở thanh toán",
+        href: buildHash("/payments", { tab: "suggest" }),
+        cta: "Cấn trừ",
+        primary: true,
       });
     }
 
-    const periodActions = [
-      renderFilterPill({
-        label: `${stats.expenseCount} khoản chi`,
-        tone: stats.expenseCount ? "neutral" : "warning",
-      }),
-      renderFilterPill({
-        label: `${settlementPlan.length} dòng cấn trừ`,
-        tone: settlementPlan.length ? "danger" : "success",
-      }),
-    ].join("");
-
-    renderShell(
-      `
-        ${renderHeroRow(stats)}
-
-        <section class="card section-card">
-          <div class="card-body section-card__body">
-            ${renderSectionHeader({
-              title: "Việc cần làm",
-              subtitle: "Những việc nên xử lý trước trong tháng này.",
-            })}
-            ${renderTasks(tasks)}
-          </div>
-        </section>
-
-        ${renderRentSection(rentSummary)}
-        ${
-          previousDebtSettlementPlan
-            ? renderPreviousDebtSection(
-                previousDebtSettlementPlan,
-                period,
-                previousDebtTimeline,
-              )
-            : `
-              <section class="card section-card">
-                <div class="card-body section-card__body">
-                  ${renderSectionHeader({
-                    title: "Nợ cũ từ các tháng trước",
-                    subtitle: "Đang kiểm tra các khoản còn treo trước tháng đang xem.",
-                  })}
-                  <div class="card">
-                    <div class="card-body d-flex align-items-center gap-3">
-                      <div class="spinner-border spinner-border-sm" role="status" aria-label="Loading"></div>
-                      <div class="text-secondary small">Đang tải nợ cũ...</div>
-                    </div>
-                  </div>
-                </div>
-              </section>
-            `
-        }
-        ${renderSettlementSection(settlementPlan)}
-      `,
-      periodActions,
+    const personalDebt = computePersonalDebt(
+      myMemberId,
+      rentSummary,
+      settlementPlan,
+      !!liveRent,
     );
 
-    app.querySelectorAll("[data-copy]").forEach((button) => {
-      button.addEventListener("click", async () => {
-        const [fromId, toId, amountString] = button
-          .getAttribute("data-copy")
-          .split("|");
-        const amount = Number(amountString || 0);
-        const text = `${nameOf(fromId)} chuyển ${formatVND(amount)} cho ${nameOf(toId)} (cấn trừ tháng này)`;
+    const previousDebtLoading = allTimeLoading;
 
-        try {
-          await navigator.clipboard.writeText(text);
-          const oldText = button.textContent;
-          button.textContent = "Đã copy";
-          setTimeout(() => {
-            button.textContent = oldText;
-          }, 900);
-        } catch {
-          window.prompt("Copy nội dung này:", text);
-        }
-      });
+    const memberSummaries = buildMemberSummaries({
+      roster: ROSTER,
+      rentDoc: liveRent,
+      settlementPlan,
     });
+
+    const heroHtml = renderBalanceHero({
+      amount: personalDebt.total,
+      status: personalDebt.status,
+      statusLabel: personalDebt.statusLabel,
+      breakdown: personalDebt.breakdown,
+      actions: [],
+    });
+    const quickCtaHtml = renderQuickCtaGrid({
+      expense: stats.expenseCount || "",
+      settle: settlementPlan.length || "",
+    });
+    const membersHtml = renderMemberSummaries(memberSummaries, myMemberId);
+    const metricsHtml = renderHeroRow(stats);
+    const bodyHtml = `
+      <div class="dash-page__stack">
+        ${renderSparkline({
+          values: buildDailyTotals(liveExpenses),
+          label: "Chi 7 ngày",
+        })}
+        ${renderRentSection(rentSummary)}
+        ${
+          allTimeStarted
+            ? renderPreviousDebtSection(
+                previousDebtSettlementPlan || [],
+                previousDebtTimeline,
+                previousDebtLoading,
+              )
+            : `
+              <details class="dash-panel" id="previousDebtPanel">
+                <summary class="dash-panel__summary">Nợ cũ</summary>
+              </details>
+            `
+        }
+      </div>
+    `;
+
+    if (!shellMounted) {
+      renderShell(
+        {
+          hero: heroHtml,
+          quick: quickCtaHtml,
+          metrics: metricsHtml,
+          members: membersHtml,
+          body: bodyHtml,
+        },
+      );
+    } else {
+      patchMainContent("#dashboard-hero", heroHtml);
+      patchMainContent("#dashboard-quick", quickCtaHtml);
+      patchMainContent("#dashboard-metrics", metricsHtml);
+      patchMainContent("#dashboard-members", membersHtml);
+      patchMainContent("#dashboard-body", bodyHtml);
+    }
   }
 
-  function startAllTimeWatchers() {
-    unsubscribeAllTimeExpenses?.();
-    unsubscribeAllTimePayments?.();
-
+  async function loadPreviousDebtData() {
+    if (allTimeStarted || allTimeLoading || disposed) return;
+    allTimeStarted = true;
+    allTimeLoading = true;
     allTimeExpensesReady = false;
     allTimePaymentsReady = false;
+    scheduleRender();
 
     const groupId = state.groupId;
 
-    unsubscribeAllTimeExpenses = watchExpenses(groupId, (items) => {
-      if (disposed) return;
-      allTimeExpenses = items;
-      allTimeExpensesReady = true;
-      recomputeAndRender();
-    });
+    try {
+      const { expensesBefore, paymentsBefore } = await fetchHistoricalBefore(
+        groupId,
+        period,
+      );
 
-    unsubscribeAllTimePayments = watchPayments(groupId, (items) => {
       if (disposed) return;
-      allTimePayments = items;
+
+      allTimeExpenses = expensesBefore;
+      allTimePayments = paymentsBefore;
+      allTimeExpensesReady = true;
       allTimePaymentsReady = true;
-      recomputeAndRender();
-    });
+    } catch (error) {
+      console.error("Failed to load previous debt data", error);
+      allTimeExpensesReady = true;
+      allTimePaymentsReady = true;
+    } finally {
+      allTimeLoading = false;
+      scheduleRender();
+    }
   }
 
   function startWatchers() {
-    unsubscribeExpenses?.();
-    unsubscribePayments?.();
-    unsubscribeRent?.();
-
+    unsubscribeHub?.();
     expensesReady = false;
     paymentsReady = false;
     rentReady = false;
 
-    const { start, end } = getMonthRange(period);
-    const groupId = state.groupId;
-
-    unsubscribeExpenses = watchExpensesByRange(groupId, start, end, (items) => {
-      if (disposed) return;
-      liveExpenses = items;
-      expensesReady = true;
-      recomputeAndRender();
-    });
-
-    unsubscribePayments = watchPaymentsByRange(groupId, start, end, (items) => {
-      if (disposed) return;
-      livePayments = items;
-      paymentsReady = true;
-      recomputeAndRender();
-    });
-
-    unsubscribeRent = watchRentByPeriod(groupId, period, (docData) => {
-      if (disposed) return;
-      liveRent = docData;
-      rentReady = true;
-      recomputeAndRender();
+    unsubscribeHub = subscribeLiveMonthData({
+      consumerId: "dashboard",
+      groupId: state.groupId,
+      period,
+      onUpdate: ({
+        expenses,
+        payments,
+        rent,
+        expensesReady: nextExpensesReady,
+        paymentsReady: nextPaymentsReady,
+        rentReady: nextRentReady,
+      }) => {
+        if (disposed) return;
+        liveExpenses = expenses;
+        livePayments = payments;
+        liveRent = rent;
+        expensesReady = nextExpensesReady;
+        paymentsReady = nextPaymentsReady;
+        rentReady = nextRentReady;
+        scheduleRender();
+      },
     });
   }
 
   function reloadPeriod(nextPeriod) {
     period = nextPeriod;
+    allTimeStarted = false;
+    allTimeExpensesReady = false;
+    allTimePaymentsReady = false;
     renderLoadingShell();
     startWatchers();
   }
 
-  const unsubscribeSelectedPeriod = subscribeSelectedPeriod((nextPeriod) => {
-    if (nextPeriod === period) return;
-    reloadPeriod(nextPeriod);
+  function dispose() {
+    disposed = true;
+    disposeScheduler();
+    unsubscribeHub?.();
+  }
+
+  mountPage({
+    dispose,
+    onRouteLeave: (hash) => {
+      if (!hash.startsWith("#/dashboard")) dispose();
+    },
+  });
+  getMainElement()?.addEventListener("toggle", (event) => {
+    if (event.target?.id === "previousDebtPanel" && event.target.open) {
+      void loadPreviousDebtData();
+    }
   });
 
-  const onHashChange = () => {
-    if (!location.hash.startsWith("#/dashboard")) {
-      disposed = true;
-      unsubscribeExpenses?.();
-      unsubscribePayments?.();
-      unsubscribeRent?.();
-      unsubscribeAllTimeExpenses?.();
-      unsubscribeAllTimePayments?.();
-      unsubscribeSelectedPeriod();
-      window.removeEventListener("hashchange", onHashChange);
-    }
-  };
-
-  window.addEventListener("hashchange", onHashChange);
   renderLoadingShell();
-  startAllTimeWatchers();
   startWatchers();
 }

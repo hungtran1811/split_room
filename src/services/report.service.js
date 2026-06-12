@@ -3,30 +3,9 @@ import { db } from "../config/firebase";
 import { ROSTER } from "../config/roster";
 import { wrapFirestoreError } from "../core/errors";
 import { buildMonthlyReport } from "../domain/report/compute";
-import {
-  getPeriod,
-  listPeriods,
-  saveMonthlyReportSnapshot as savePeriodReportSnapshot,
-} from "./period.service";
+import { saveMonthlyReportSnapshot as savePeriodReportSnapshot } from "./period.service";
 import { getRentByPeriod } from "./rent.service";
-
-function getMonthRange(period) {
-  const [year, month] = String(period || "").split("-").map(Number);
-  const start = `${String(year).padStart(4, "0")}-${String(month).padStart(
-    2,
-    "0",
-  )}-01`;
-  const next = new Date(year, month - 1, 1);
-  next.setMonth(next.getMonth() + 1);
-
-  return {
-    start,
-    end: `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(
-      2,
-      "0",
-    )}-01`,
-  };
-}
+import { getMonthRange } from "./month-ops.service";
 
 function normalizeDocs(snapshot) {
   return snapshot.docs.map((docSnap) => ({
@@ -142,27 +121,6 @@ export async function getMonthlyReportLive(groupId, period) {
       error,
       `Không thể tải báo cáo tháng ${period}.`,
     );
-  }
-}
-
-export async function getMonthlyReportSnapshot(groupId, period) {
-  try {
-    const periodDoc = await getPeriod(groupId, period);
-    return normalizeMonthlyReportSnapshot(period, periodDoc);
-  } catch (error) {
-    throw wrapFirestoreError(
-      error,
-      `Không thể tải snapshot báo cáo tháng ${period}.`,
-    );
-  }
-}
-
-export async function listMonthlyReportPeriods(groupId) {
-  try {
-    const periods = await listPeriods(groupId);
-    return periods.map(toPeriodSummary).filter(Boolean);
-  } catch (error) {
-    throw wrapFirestoreError(error, "Không thể tải lịch sử snapshot.");
   }
 }
 

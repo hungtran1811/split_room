@@ -101,81 +101,36 @@ export async function upsertRentByPeriod(groupId, period, payload) {
   }
 }
 
-export async function updateRentByPeriod(groupId, period, patch) {
-  const existingRent = await getRentByPeriod(groupId, period);
-  const nextPayload = buildRentPayload(
-    period,
-    { ...(existingRent || {}), ...patch },
-    existingRent,
-  );
-
-  try {
-    await setDoc(rentDocRef(groupId, period), nextPayload, { merge: true });
-  } catch (error) {
-    throw wrapRentError(error, period, `groups/${groupId}/rents/${period}`);
-  }
-}
-
 export function watchRentByPeriod(groupId, period, callback) {
-  let directValue = undefined;
-  let fallbackValue = undefined;
+  let emitted = false;
 
-  const emit = () => {
-    if (directValue && typeof directValue === "object") {
-      callback(directValue);
-      return;
-    }
-
-    if (fallbackValue && typeof fallbackValue === "object") {
-      callback(fallbackValue);
-      return;
-    }
-
-    if (directValue !== undefined || fallbackValue !== undefined) {
-      callback(null);
-    }
-  };
-
-  const unsubDirect = onSnapshot(
+  return onSnapshot(
     rentDocRef(groupId, period),
-    (snap) => {
-      directValue = snap.exists() ? normalizeRentDoc(period, snap.data()) : null;
-      emit();
+    async (snap) => {
+      if (snap.exists()) {
+        emitted = true;
+        callback(normalizeRentDoc(period, snap.data()));
+        return;
+      }
+
+      if (!emitted) {
+        const fallback = await readRentFromPeriodDoc(groupId, period);
+        emitted = true;
+        callback(fallback);
+        return;
+      }
+
+      callback(null);
     },
     (error) => {
       if (isPermissionDenied(error)) {
-        directValue = null;
-        emit();
+        callback(null);
         return;
       }
 
       console.error(`[rent] watch failed for rents/${period}`, error);
     },
   );
-
-  const unsubFallback = onSnapshot(
-    periodDocRef(groupId, period),
-    (snap) => {
-      fallbackValue = snap.exists()
-        ? normalizePeriodRentDoc(period, snap.data())
-        : null;
-      emit();
-    },
-    (error) => {
-      if (isPermissionDenied(error)) {
-        fallbackValue = null;
-        emit();
-        return;
-      }
-
-      console.error(`[rent] watch failed for periods/${period}`, error);
-    },
-  );
-
-  return () => {
-    unsubDirect();
-    unsubFallback();
-  };
 }
 
 export async function getRentByPeriod(groupId, period) {
