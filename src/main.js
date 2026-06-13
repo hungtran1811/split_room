@@ -1,5 +1,7 @@
+import * as bootstrap from "bootstrap";
 import "bootstrap/dist/css/bootstrap.min.css";
-import "bootstrap/dist/js/bootstrap.bundle.min.js";
+
+window.bootstrap = bootstrap;
 import "./styles/tokens.css";
 import "./styles/app.css";
 import "./styles/auth.css";
