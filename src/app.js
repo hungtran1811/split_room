@@ -32,7 +32,7 @@ import {
   watchGroupMembers,
   watchMyMemberProfile,
 } from "./services/member.service";
-import { EMAIL_TO_MEMBER_ID } from "./config/members.map";
+import { EMAIL_TO_MEMBER_ID, resolveMemberIdFromEmail } from "./config/members.map";
 import { LEGACY_OWNER_UID } from "./config/constants";
 
 let authReady = false;
@@ -133,7 +133,7 @@ function startGroupSubscriptions(groupId, uid) {
 
 async function ensureMemberProfile() {
   const email = state.user?.email || "";
-  const memberId = EMAIL_TO_MEMBER_ID[email];
+  const memberId = resolveMemberIdFromEmail(email);
 
   if (!memberId) {
     throw new Error("Email chưa được gán thành viên trong nhóm.");

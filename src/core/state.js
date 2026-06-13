@@ -117,6 +117,7 @@ export function subscribeSelectedPeriod(listener) {
 
 export function setUser(user) {
   state.user = user;
+  state.canAddExpense = canAddExpense(state.memberProfile, user?.email || "");
 }
 
 export function setGroup(groupId) {
@@ -136,7 +137,7 @@ export function setMemberProfile(profile) {
     state.isAdmin = false;
     state.isOwner = false;
     state.canOperateMonth = false;
-    state.canAddExpense = false;
+    state.canAddExpense = canAddExpense(null, state.user?.email || "");
     return;
   }
 
@@ -146,6 +147,9 @@ export function setMemberProfile(profile) {
   };
   state.isOwner = isOwnerProfile(state.memberProfile);
   state.canOperateMonth = canOperateMonth(state.memberProfile);
-  state.canAddExpense = canAddExpense(state.memberProfile);
+  state.canAddExpense = canAddExpense(
+    state.memberProfile,
+    state.memberProfile.email || state.user?.email || "",
+  );
   state.isAdmin = isAdminProfile(state.memberProfile);
 }

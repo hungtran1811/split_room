@@ -1,4 +1,5 @@
 import { LEGACY_OWNER_UID, OWNER_MEMBER_ID } from "../config/constants";
+import { resolveMemberIdFromEmail } from "../config/members.map";
 
 export function normalizeMemberRole(profile) {
   if (!profile) return "member";
@@ -31,9 +32,16 @@ export function canOperateMonth(profile) {
   return role === "owner" || role === "admin";
 }
 
-export function canAddExpense(profile) {
-  if (!profile?.memberId) return false;
-  const role = normalizeMemberRole(profile);
+export function canAddExpense(profile, email = "") {
+  const memberId = profile?.memberId || resolveMemberIdFromEmail(email);
+  if (!memberId) return false;
+
+  const role = normalizeMemberRole(
+    profile || {
+      memberId,
+      role: "member",
+    },
+  );
   return role === "owner" || role === "admin" || role === "member";
 }
 

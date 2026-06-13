@@ -78,15 +78,35 @@ function findJavaFromKnownRoots() {
   return null;
 }
 
+function findJavaFromPath() {
+  if (process.platform === "win32") {
+    return findJavaFromWhere();
+  }
+
+  const result = spawnSync("which", ["java"], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+
+  if (result.status !== 0) return null;
+
+  const candidate = result.stdout
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find(Boolean);
+
+  return candidate && pathExists(candidate) ? candidate : null;
+}
+
 function resolveJavaExecutable() {
+  const isWin = process.platform === "win32";
+  const javaName = isWin ? "java.exe" : "java";
   const javaHome = process.env.JAVA_HOME;
-  const fromJavaHome = javaHome
-    ? path.join(javaHome, "bin", "java.exe")
-    : null;
+  const fromJavaHome = javaHome ? path.join(javaHome, "bin", javaName) : null;
 
   return (
     (fromJavaHome && pathExists(fromJavaHome) && fromJavaHome) ||
-    findJavaFromWhere() ||
+    findJavaFromPath() ||
     findJavaFromKnownRoots()
   );
 }
@@ -149,10 +169,13 @@ async function main() {
 
   const javaBinDir = path.dirname(javaExecutable);
   const javaHome = path.dirname(javaBinDir);
+  const pathKey = process.platform === "win32" ? "Path" : "PATH";
   const env = {
     ...process.env,
     JAVA_HOME: process.env.JAVA_HOME || javaHome,
-    PATH: [javaBinDir, process.env.PATH || ""].filter(Boolean).join(path.delimiter),
+    [pathKey]: [javaBinDir, process.env[pathKey] || process.env.PATH || ""]
+      .filter(Boolean)
+      .join(path.delimiter),
   };
 
   const args = buildFirebaseArgs(mode);

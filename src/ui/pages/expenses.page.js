@@ -11,7 +11,8 @@ import { mapFirestoreError } from "../../core/errors";
 import { showToast } from "../components/toast";
 import { openConfirmModal } from "../components/confirmModal";
 import { openExpenseEditModal } from "../components/expenseEditModal";
-import { EMAIL_TO_MEMBER_ID } from "../../config/members.map";
+import { resolveMemberIdFromEmail } from "../../config/members.map";
+import { canAddExpense } from "../../core/roles";
 import { getMemberPhotoUrl, renderMemberChip } from "../components/memberChip";
 import { getRouteQuery } from "../../core/routing";
 import { mountAuthenticatedPage } from "../layout/page-mount";
@@ -23,6 +24,7 @@ import {
 } from "../../services/expense.service";
 import { getMonthRange } from "../../services/month-ops.service";
 import { subscribeLiveMonthData } from "../../services/live-data-hub";
+import { watchMyMemberProfile } from "../../services/member.service";
 import { renderIconButton, renderListRow } from "../components/listRow";
 import { renderMoneyStatCard } from "../components/metricTile";
 import {
@@ -93,19 +95,48 @@ export async function renderExpensesPage() {
   function getMyMemberId() {
     return (
       state.memberProfile?.memberId ||
-      EMAIL_TO_MEMBER_ID[state.user?.email || ""] ||
+      resolveMemberIdFromEmail(state.user?.email) ||
       ROSTER_IDS[0]
     );
   }
   const groupId = state.groupId;
-  const canAddExpenseEntry = state.canAddExpense;
   const canManageEntries = state.canOperateMonth;
   const composerOpenByDefault = true;
   const currentUserLabel = getCurrentUserLabel(state);
+
+  function canAddExpenseNow() {
+    return canAddExpense(state.memberProfile, state.user?.email || "");
+  }
+
+  function syncExpensePermissions() {
+    const canAdd = canAddExpenseNow();
+    const saveButton = byId("btnSaveExpense");
+    if (saveButton) {
+      saveButton.disabled = !canAdd;
+    }
+
+    const banner = byId("expensePermissionBanner");
+    if (banner) {
+      if (!canAdd) {
+        banner.hidden = false;
+        banner.textContent =
+          "Tài khoản chưa được gán thành viên — không thể thêm chi tiêu.";
+        banner.className = "readonly-banner";
+      } else if (!canManageEntries) {
+        banner.hidden = false;
+        banner.textContent =
+          "Mọi thành viên có thể thêm chi. Chỉ admin sửa/xóa khoản chi.";
+        banner.className = "readonly-banner readonly-banner--info";
+      } else {
+        banner.hidden = true;
+      }
+    }
+  }
   let selectedPeriod = getSelectedPeriod();
   let selectedExpenseDate = getRouteQuery().get("date") || "";
   let expenseListOpen = false;
   let unsubscribeExpenses = null;
+  let unsubProfile = null;
   let liveExpenses = [];
 
   function setMessage(text = "") {
@@ -248,7 +279,7 @@ export async function renderExpensesPage() {
   }
 
   async function saveExpense() {
-    if (!canAddExpenseEntry) {
+    if (!canAddExpenseNow()) {
       setMessage("Tài khoản chưa được gán thành viên trong nhóm.");
       return;
     }
@@ -322,7 +353,7 @@ export async function renderExpensesPage() {
         variant: "danger",
       });
     } finally {
-      button.disabled = false;
+      button.disabled = !canAddExpenseNow();
       button.textContent = "Lưu chi tiêu";
     }
   }
@@ -351,7 +382,7 @@ export async function renderExpensesPage() {
             Không có khoản chi nào vào ${selectedExpenseDate}.
           </div>
           ${
-            canAddExpenseEntry
+            canAddExpenseNow()
               ? '<button type="button" class="btn btn-primary mt-3" id="btnEmptyAddExpense">Thêm chi cho ngày này</button>'
               : ""
           }
@@ -492,13 +523,7 @@ export async function renderExpensesPage() {
           ${renderExpenseSummary(liveExpenses, [], "")}
         </div>
 
-        ${
-          !canAddExpenseEntry
-            ? `<div class="readonly-banner">Tài khoản chưa được gán thành viên — không thể thêm chi tiêu.</div>`
-            : !canManageEntries
-              ? `<div class="readonly-banner readonly-banner--info">Mọi thành viên có thể thêm chi. Chỉ admin sửa/xóa khoản chi.</div>`
-              : ""
-        }
+        <div id="expensePermissionBanner" class="readonly-banner" hidden></div>
 
         <section class="card section-card expense-filter">
           <div class="card-body section-card__body">
@@ -619,7 +644,7 @@ export async function renderExpensesPage() {
               </div>
 
               <div class="col-12 d-flex flex-wrap gap-2 align-items-center">
-                <button id="btnSaveExpense" class="btn btn-primary" ${canAddExpenseEntry ? "" : "disabled"}>Lưu chi tiêu</button>
+                <button id="btnSaveExpense" class="btn btn-primary">Lưu chi tiêu</button>
                 <button id="btnResetExpense" class="btn btn-outline-secondary">Nhập lại</button>
                 <div id="msg" class="small text-danger"></div>
               </div>
@@ -736,11 +761,17 @@ export async function renderExpensesPage() {
   bindEvents();
   resetForm();
   syncExpenseView();
+  syncExpensePermissions();
   startWatch();
+
+  const unsubProfile = watchMyMemberProfile(groupId, state.user.uid, () => {
+    syncExpensePermissions();
+  });
 
   const onHashChange = () => {
     if (!location.hash.startsWith("#/expenses")) {
       unsubscribeExpenses?.();
+      unsubProfile?.();
       window.removeEventListener("hashchange", onHashChange);
     }
   };

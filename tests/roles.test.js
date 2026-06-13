@@ -78,6 +78,10 @@ describe("roles", () => {
     ).toBe(true);
 
     expect(canAddExpense(null)).toBe(false);
+
+    expect(
+      canAddExpense(null, "huynhthanhthao14062001@gmail.com"),
+    ).toBe(true);
   });
 
   it("detects owner profiles correctly", () => {
