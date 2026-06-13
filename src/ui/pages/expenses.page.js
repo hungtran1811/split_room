@@ -764,7 +764,7 @@ export async function renderExpensesPage() {
   syncExpensePermissions();
   startWatch();
 
-  const unsubProfile = watchMyMemberProfile(groupId, state.user.uid, () => {
+  unsubProfile = watchMyMemberProfile(groupId, state.user.uid, () => {
     syncExpensePermissions();
   });
 
