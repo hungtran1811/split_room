@@ -98,8 +98,9 @@ export async function renderExpensesPage() {
     );
   }
   const groupId = state.groupId;
+  const canAddExpenseEntry = state.canAddExpense;
   const canManageEntries = state.canOperateMonth;
-  const composerOpenByDefault = window.matchMedia("(min-width: 992px)").matches;
+  const composerOpenByDefault = true;
   const currentUserLabel = getCurrentUserLabel(state);
   let selectedPeriod = getSelectedPeriod();
   let selectedExpenseDate = getRouteQuery().get("date") || "";
@@ -226,7 +227,32 @@ export async function renderExpensesPage() {
     renderDebtsInputs();
   }
 
+  function isDateInSelectedPeriod(date) {
+    const { start, end } = getMonthRange(selectedPeriod);
+    return date >= start && date < end;
+  }
+
+  function buildExpenseDebts(amount, payerId, participants, equalSplit) {
+    if (equalSplit) {
+      const equalShares = buildWholeEqualShares(amount, participants);
+      const debts = {};
+      for (const memberId of participants) {
+        if (memberId === payerId) continue;
+        const share = equalShares[memberId] || 0;
+        if (share > 0) debts[memberId] = share;
+      }
+      return debts;
+    }
+
+    return getDebtsFromInputs(payerId);
+  }
+
   async function saveExpense() {
+    if (!canAddExpenseEntry) {
+      setMessage("Tài khoản chưa được gán thành viên trong nhóm.");
+      return;
+    }
+
     const date = byId("exDate").value || defaultExpenseDate(selectedPeriod);
     const amount = toWholeVnd(parseVndInput(byId("exAmount").value));
     const payerId = byId("exPayer").value;
@@ -246,7 +272,13 @@ export async function renderExpensesPage() {
       return;
     }
 
-    const debts = getDebtsFromInputs(payerId);
+    if (!isDateInSelectedPeriod(date)) {
+      setMessage(`Ngày ghi chi phải thuộc tháng ${selectedPeriod}.`);
+      return;
+    }
+
+    const equalSplit = byId("exEqual").checked;
+    const debts = buildExpenseDebts(amount, payerId, participants, equalSplit);
     const sumDebts = Object.values(debts).reduce((sum, value) => sum + value, 0);
     if (sumDebts - amount > 0.000001) {
       setMessage("Tổng nợ của người khác không được lớn hơn tổng tiền.");
@@ -275,6 +307,9 @@ export async function renderExpensesPage() {
         variant: "success",
       });
       resetForm();
+      selectedExpenseDate = date;
+      expenseListOpen = true;
+      syncExpenseView();
       if (!composerOpenByDefault) {
         byId("expenseComposer").open = false;
       }
@@ -316,7 +351,7 @@ export async function renderExpensesPage() {
             Không có khoản chi nào vào ${selectedExpenseDate}.
           </div>
           ${
-            canManageEntries
+            canAddExpenseEntry
               ? '<button type="button" class="btn btn-primary mt-3" id="btnEmptyAddExpense">Thêm chi cho ngày này</button>'
               : ""
           }
@@ -457,6 +492,14 @@ export async function renderExpensesPage() {
           ${renderExpenseSummary(liveExpenses, [], "")}
         </div>
 
+        ${
+          !canAddExpenseEntry
+            ? `<div class="readonly-banner">Tài khoản chưa được gán thành viên — không thể thêm chi tiêu.</div>`
+            : !canManageEntries
+              ? `<div class="readonly-banner readonly-banner--info">Mọi thành viên có thể thêm chi. Chỉ admin sửa/xóa khoản chi.</div>`
+              : ""
+        }
+
         <section class="card section-card expense-filter">
           <div class="card-body section-card__body">
             <div class="expense-filter__row">
@@ -576,7 +619,7 @@ export async function renderExpensesPage() {
               </div>
 
               <div class="col-12 d-flex flex-wrap gap-2 align-items-center">
-                <button id="btnSaveExpense" class="btn btn-primary">Lưu chi tiêu</button>
+                <button id="btnSaveExpense" class="btn btn-primary" ${canAddExpenseEntry ? "" : "disabled"}>Lưu chi tiêu</button>
                 <button id="btnResetExpense" class="btn btn-outline-secondary">Nhập lại</button>
                 <div id="msg" class="small text-danger"></div>
               </div>

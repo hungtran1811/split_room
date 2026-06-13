@@ -284,6 +284,24 @@ describe("firestore rules", () => {
     );
   });
 
+  it("allows members to create expenses", async () => {
+    const memberDb = testEnv.authenticatedContext(MEMBER_UID, {
+      email: "huynhthanhthao14062001@gmail.com",
+    }).firestore();
+
+    await assertSucceeds(
+      memberDb.doc("groups/P102/expenses/exp-1").set({
+        date: "2026-03-15",
+        amount: 120000,
+        payerId: "thao",
+        participants: ["thao", "hung"],
+        debts: { hung: 60000 },
+        note: "An trua",
+        createdBy: MEMBER_UID,
+      }),
+    );
+  });
+
   it("blocks outsiders from reading rent docs", async () => {
     await testEnv.withSecurityRulesDisabled(async (context) => {
       await context.firestore()

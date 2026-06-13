@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  canAddExpense,
   canOperateMonth,
   isOwnerProfile,
   normalizeMemberRole,
@@ -57,6 +58,26 @@ describe("roles", () => {
         role: "member",
       }),
     ).toBe(false);
+  });
+
+  it("allows all group members to add expenses", () => {
+    expect(
+      canAddExpense({
+        uid: "member-uid",
+        memberId: "thao",
+        role: "member",
+      }),
+    ).toBe(true);
+
+    expect(
+      canAddExpense({
+        uid: "backup-admin-uid",
+        memberId: "thinh",
+        role: "admin",
+      }),
+    ).toBe(true);
+
+    expect(canAddExpense(null)).toBe(false);
   });
 
   it("detects owner profiles correctly", () => {

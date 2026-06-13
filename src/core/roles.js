@@ -31,6 +31,12 @@ export function canOperateMonth(profile) {
   return role === "owner" || role === "admin";
 }
 
+export function canAddExpense(profile) {
+  if (!profile?.memberId) return false;
+  const role = normalizeMemberRole(profile);
+  return role === "owner" || role === "admin" || role === "member";
+}
+
 export function isAdminProfile(profile) {
   return canOperateMonth(profile);
 }

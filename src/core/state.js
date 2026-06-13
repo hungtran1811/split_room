@@ -1,4 +1,5 @@
 import {
+  canAddExpense,
   canOperateMonth,
   isAdminProfile,
   isOwnerProfile,
@@ -18,6 +19,7 @@ export const state = {
   isAdmin: false,
   isOwner: false,
   canOperateMonth: false,
+  canAddExpense: false,
   selectedPeriod: "",
 };
 
@@ -134,6 +136,7 @@ export function setMemberProfile(profile) {
     state.isAdmin = false;
     state.isOwner = false;
     state.canOperateMonth = false;
+    state.canAddExpense = false;
     return;
   }
 
@@ -143,5 +146,6 @@ export function setMemberProfile(profile) {
   };
   state.isOwner = isOwnerProfile(state.memberProfile);
   state.canOperateMonth = canOperateMonth(state.memberProfile);
+  state.canAddExpense = canAddExpense(state.memberProfile);
   state.isAdmin = isAdminProfile(state.memberProfile);
 }

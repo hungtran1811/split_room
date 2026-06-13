@@ -1262,6 +1262,12 @@ button.profile-menu__item {
   font-size: var(--text-sm);
 }
 
+.readonly-banner--info {
+  border-color: rgba(29, 78, 216, 0.16);
+  background: var(--primary-soft);
+  color: var(--accent);
+}
+
 .auth-hero-mark {
   display: inline-flex;
   align-items: center;
