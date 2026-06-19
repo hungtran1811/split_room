@@ -361,6 +361,10 @@
   gap: 8px;
 }
 
+.expense-filter__actions .btn[aria-pressed="true"] {
+  pointer-events: none;
+}
+
 @media (max-width: 575px) {
   .expense-filter__row {
     grid-template-columns: 1fr;
@@ -1139,32 +1143,8 @@ button.profile-menu__item {
 
 .member-chip {
   display: inline-flex;
-  gap: 8px;
   align-items: center;
   min-width: 0;
-}
-
-.member-chip__avatar {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  object-fit: cover;
-  flex: 0 0 auto;
-}
-
-.member-chip--sm .member-chip__avatar {
-  width: 28px;
-  height: 28px;
-}
-
-.member-chip__avatar--fallback {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: color-mix(in srgb, var(--member-color) 16%, white);
-  color: var(--member-color);
-  font-size: var(--text-sm);
-  font-weight: 700;
 }
 
 .member-chip__name {

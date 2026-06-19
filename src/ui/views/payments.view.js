@@ -6,7 +6,6 @@ import { formatVND } from "../../config/i18n";
 import { buildMonthlySettlementView } from "../../domain/matrix/compute";
 import { getMonthRange } from "../../services/month-ops.service";
 import { renderMatrixTable } from "../components/matrixTable";
-import { getMemberPhotoUrl, renderMemberChip } from "../components/memberChip";
 import { renderIconButton, renderListRow } from "../components/listRow";
 import { renderMetricGrid } from "../components/metricTile";
 import { renderSectionHeader } from "../components/sectionHeader";
@@ -282,12 +281,6 @@ function renderSettlementList(items, canOperateMonth) {
             : "";
 
           return renderListRow({
-            leading: renderMemberChip({
-              memberId: item.fromId,
-              label: nameOf(item.fromId),
-              photoURL: getMemberPhotoUrl(item.fromId, state.members),
-              size: "sm",
-            }),
             title: `${nameOf(item.fromId)} → ${nameOf(item.toId)}`,
             amount: formatPaymentVND(item.amount),
             actions,

@@ -1,5 +1,5 @@
 import { formatVND } from "../../config/i18n";
-import { getInitials, renderIcon } from "../icons";
+import { renderIcon } from "../icons";
 
 const QUICK_CTAS = [
   {
@@ -157,7 +157,6 @@ export function renderMemberSummaries(summaries = [], myMemberId = "") {
             return `
               <article class="dash-member dash-member--${member.status} ${isMe ? "dash-member--me" : ""}">
                 <div class="dash-member__top">
-                  <span class="dash-member__avatar">${getInitials(member.name)}</span>
                   <div class="dash-member__identity">
                     <strong class="dash-member__name">${member.name}${isMe ? " (bạn)" : ""}</strong>
                     <span class="dash-member__badge dash-member__badge--${member.status}">${member.statusLabel}</span>

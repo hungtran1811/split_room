@@ -430,20 +430,6 @@
 .dash-member__top {
   display: flex;
   align-items: center;
-  gap: 10px;
-}
-
-.dash-member__avatar {
-  display: inline-grid;
-  place-items: center;
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  background: var(--accent-soft);
-  color: var(--accent);
-  font-size: 0.7rem;
-  font-weight: 800;
-  flex-shrink: 0;
 }
 
 .dash-member__identity {

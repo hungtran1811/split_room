@@ -6,7 +6,20 @@ export function filterExpensesByDate(expenses, selectedExpenseDate) {
   return (expenses || []).filter((expense) => expense.date === selectedExpenseDate);
 }
 
-export function groupExpensesByDate(expenses) {
+export function getVisibleExpenses(
+  expenses,
+  { selectedExpenseDate = "", showAllMonth = false } = {},
+) {
+  if (showAllMonth) {
+    return [...(expenses || [])].sort((left, right) =>
+      String(right.date || "").localeCompare(String(left.date || "")),
+    );
+  }
+
+  return filterExpensesByDate(expenses, selectedExpenseDate);
+}
+
+export function groupExpensesByDate(expenses, { descending = true } = {}) {
   const groups = new Map();
   for (const expense of expenses) {
     const key = expense.date || "Không rõ ngày";
@@ -14,13 +27,24 @@ export function groupExpensesByDate(expenses) {
     groups.get(key).push(expense);
   }
 
-  return [...groups.entries()].map(([date, items]) => ({
+  const entries = [...groups.entries()];
+  entries.sort((left, right) =>
+    descending
+      ? right[0].localeCompare(left[0])
+      : left[0].localeCompare(right[0]),
+  );
+
+  return entries.map(([date, items]) => ({
     date,
     items,
   }));
 }
 
-export function renderExpenseSummary(monthExpenses, filteredExpenses, selectedExpenseDate) {
+export function renderExpenseSummary(
+  monthExpenses,
+  filteredExpenses,
+  { selectedExpenseDate = "", showAllMonth = false } = {},
+) {
   const monthTotal = monthExpenses.reduce(
     (sum, item) => sum + Number(item.amount || 0),
     0,
@@ -30,6 +54,22 @@ export function renderExpenseSummary(monthExpenses, filteredExpenses, selectedEx
     0,
   );
 
+  const detailMetric = showAllMonth
+    ? {
+        label: "Đang xem",
+        value: formatVND(monthTotal),
+        delta: `${monthExpenses.length} khoản • Cả tháng`,
+        tone: monthTotal > 0 ? "positive" : "neutral",
+      }
+    : {
+        label: selectedExpenseDate ? "Chi ngày đã chọn" : "Chi ngày",
+        value: selectedExpenseDate ? formatVND(dayTotal) : "—",
+        delta: selectedExpenseDate
+          ? `${filteredExpenses.length} khoản • ${selectedExpenseDate}`
+          : "Chọn ngày hoặc xem cả tháng",
+        tone: selectedExpenseDate && dayTotal > 0 ? "positive" : "neutral",
+      };
+
   return renderMetricGrid(
     [
       {
@@ -38,14 +78,7 @@ export function renderExpenseSummary(monthExpenses, filteredExpenses, selectedEx
         delta: `${monthExpenses.length} khoản`,
         tone: monthTotal > 0 ? "neutral" : "warning",
       },
-      {
-        label: selectedExpenseDate ? "Chi ngày đã chọn" : "Chi ngày",
-        value: selectedExpenseDate ? formatVND(dayTotal) : "—",
-        delta: selectedExpenseDate
-          ? `${filteredExpenses.length} khoản • ${selectedExpenseDate}`
-          : "Chọn ngày bên dưới",
-        tone: selectedExpenseDate && dayTotal > 0 ? "positive" : "neutral",
-      },
+      detailMetric,
     ],
     { columns: 2 },
   );

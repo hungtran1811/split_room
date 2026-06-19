@@ -8,7 +8,7 @@ import {
 import { ROSTER_IDS, nameOf } from "../../config/roster";
 import { formatVND } from "../../config/i18n";
 import { showToast } from "../components/toast";
-import { getMemberPhotoUrl, renderMemberChip } from "../components/memberChip";
+import { renderMemberChip } from "../components/memberChip";
 import { mountAuthenticatedPage } from "../layout/page-mount";
 import { getAppRoot } from "../layout/shell-controller";
 import { renderMetricGrid, renderMoneyStatCard } from "../components/metricTile";
@@ -381,7 +381,6 @@ export async function renderRentPage() {
               ${renderMemberChip({
                 memberId,
                 label: nameOf(memberId),
-                photoURL: getMemberPhotoUrl(memberId, state.members),
               })}
               <div class="text-end">
                 ${rentStatusChip(share, paidValue)}

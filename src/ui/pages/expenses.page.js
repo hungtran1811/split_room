@@ -13,7 +13,6 @@ import { openConfirmModal } from "../components/confirmModal";
 import { openExpenseEditModal } from "../components/expenseEditModal";
 import { resolveMemberIdFromEmail } from "../../config/members.map";
 import { canAddExpense } from "../../core/roles";
-import { getMemberPhotoUrl, renderMemberChip } from "../components/memberChip";
 import { getRouteQuery } from "../../core/routing";
 import { mountAuthenticatedPage } from "../layout/page-mount";
 import { getAppRoot } from "../layout/shell-controller";
@@ -28,7 +27,7 @@ import { watchMyMemberProfile } from "../../services/member.service";
 import { renderIconButton, renderListRow } from "../components/listRow";
 import { renderMoneyStatCard } from "../components/metricTile";
 import {
-  filterExpensesByDate,
+  getVisibleExpenses,
   groupExpensesByDate,
   renderExpenseSummary,
 } from "../views/expenses.view";
@@ -134,6 +133,7 @@ export async function renderExpensesPage() {
   }
   let selectedPeriod = getSelectedPeriod();
   let selectedExpenseDate = getRouteQuery().get("date") || "";
+  let showAllMonthExpenses = false;
   let expenseListOpen = false;
   let unsubscribeExpenses = null;
   let unsubProfile = null;
@@ -144,7 +144,14 @@ export async function renderExpensesPage() {
   }
 
   function visibleExpenses() {
-    return filterExpensesByDate(liveExpenses, selectedExpenseDate);
+    return getVisibleExpenses(liveExpenses, {
+      selectedExpenseDate,
+      showAllMonth: showAllMonthExpenses,
+    });
+  }
+
+  function hasExpenseListFilter() {
+    return showAllMonthExpenses || !!selectedExpenseDate;
   }
 
   function syncExpenseView() {
@@ -153,18 +160,28 @@ export async function renderExpensesPage() {
 
     const summaryEl = byId("expensesSummary");
     if (summaryEl) {
-      summaryEl.innerHTML = renderExpenseSummary(
-        liveExpenses,
-        filtered,
+      summaryEl.innerHTML = renderExpenseSummary(liveExpenses, filtered, {
         selectedExpenseDate,
-      );
+        showAllMonth: showAllMonthExpenses,
+      });
     }
 
     const countEl = byId("expensesCount");
     if (countEl) {
-      countEl.textContent = selectedExpenseDate
-        ? `${filtered.length} khoản`
-        : "Chưa chọn";
+      if (showAllMonthExpenses) {
+        countEl.textContent = `${liveExpenses.length} khoản`;
+      } else if (selectedExpenseDate) {
+        countEl.textContent = `${filtered.length} khoản`;
+      } else {
+        countEl.textContent = "Chưa chọn";
+      }
+    }
+
+    const historyTitleEl = byId("expensesHistoryTitle");
+    if (historyTitleEl) {
+      historyTitleEl.textContent = showAllMonthExpenses
+        ? "Khoản chi trong tháng"
+        : "Khoản chi theo ngày";
     }
 
     const filterInputEl = byId("expenseDateFilter");
@@ -172,9 +189,24 @@ export async function renderExpensesPage() {
       filterInputEl.value = selectedExpenseDate;
     }
 
+    const resetButton = byId("btnResetExpenseDate");
+    if (resetButton) {
+      resetButton.disabled = !hasExpenseListFilter();
+    }
+
+    const viewAllButton = byId("btnViewAllMonthExpenses");
+    if (viewAllButton) {
+      viewAllButton.disabled = showAllMonthExpenses;
+      viewAllButton.setAttribute(
+        "aria-pressed",
+        showAllMonthExpenses ? "true" : "false",
+      );
+    }
+
     const historyPanel = byId("expensesHistory");
-    if (historyPanel && selectedExpenseDate) {
+    if (historyPanel && hasExpenseListFilter()) {
       historyPanel.open = true;
+      expenseListOpen = true;
     }
   }
 
@@ -339,6 +371,7 @@ export async function renderExpensesPage() {
       });
       resetForm();
       selectedExpenseDate = date;
+      showAllMonthExpenses = false;
       expenseListOpen = true;
       syncExpenseView();
       if (!composerOpenByDefault) {
@@ -362,28 +395,48 @@ export async function renderExpensesPage() {
     const wrap = byId("expensesList");
     if (!wrap) return;
 
-    if (!selectedExpenseDate) {
+    if (!selectedExpenseDate && !showAllMonthExpenses) {
       wrap.innerHTML = `
         <div class="empty-state">
-          <div class="empty-state__title">Chọn ngày để xem khoản chi</div>
+          <div class="empty-state__title">Chọn ngày hoặc xem cả tháng</div>
           <div class="empty-state__text">
-            Dùng bộ lọc phía trên để tìm chi tiêu theo ngày trong tháng ${selectedPeriod}.
+            Dùng bộ lọc phía trên để tìm chi tiêu theo ngày, hoặc bấm
+            <strong>Xem cả tháng</strong> để xem toàn bộ khoản chi trong tháng ${selectedPeriod}.
           </div>
+          <button type="button" class="btn btn-outline-primary mt-3" id="btnEmptyViewAllMonth">
+            Xem cả tháng
+          </button>
         </div>
       `;
+      wrap.querySelector("#btnEmptyViewAllMonth")?.addEventListener("click", () => {
+        showAllMonthExpenses = true;
+        selectedExpenseDate = "";
+        if (byId("expenseDateFilter")) byId("expenseDateFilter").value = "";
+        syncExpenseView();
+      });
       return;
     }
 
     if (!expenses.length) {
       wrap.innerHTML = `
         <div class="empty-state">
-          <div class="empty-state__title">Không có khoản chi trong ngày này</div>
+          <div class="empty-state__title">${
+            showAllMonthExpenses
+              ? "Không có khoản chi trong tháng này"
+              : "Không có khoản chi trong ngày này"
+          }</div>
           <div class="empty-state__text">
-            Không có khoản chi nào vào ${selectedExpenseDate}.
+            ${
+              showAllMonthExpenses
+                ? `Chưa ghi nhận khoản chi nào trong tháng ${selectedPeriod}.`
+                : `Không có khoản chi nào vào ${selectedExpenseDate}.`
+            }
           </div>
           ${
             canAddExpenseNow()
-              ? '<button type="button" class="btn btn-primary mt-3" id="btnEmptyAddExpense">Thêm chi cho ngày này</button>'
+              ? `<button type="button" class="btn btn-primary mt-3" id="btnEmptyAddExpense">${
+                  showAllMonthExpenses ? "Thêm khoản chi" : "Thêm chi cho ngày này"
+                }</button>`
               : ""
           }
         </div>
@@ -418,12 +471,6 @@ export async function renderExpensesPage() {
                     : "";
 
                   return renderListRow({
-                    leading: renderMemberChip({
-                      memberId: expense.payerId,
-                      label: nameOf(expense.payerId),
-                      photoURL: getMemberPhotoUrl(expense.payerId, state.members),
-                      size: "sm",
-                    }),
                     title: nameOf(expense.payerId),
                     subtitle: expense.note || "Không có ghi chú",
                     amount: formatVND(expense.amount),
@@ -540,8 +587,11 @@ export async function renderExpensesPage() {
                 />
               </div>
               <div class="expense-filter__actions">
+                <button type="button" class="btn btn-outline-primary" id="btnViewAllMonthExpenses">
+                  Xem cả tháng
+                </button>
                 <button type="button" class="btn btn-primary" id="btnApplyExpenseDate">
-                  Xem
+                  Xem ngày
                 </button>
                 <button type="button" class="btn btn-outline-secondary" id="btnResetExpenseDate" disabled>
                   Bỏ lọc
@@ -654,7 +704,7 @@ export async function renderExpensesPage() {
 
         <details class="card section-card section-toggle card--compact" id="expensesHistory" ${expenseListOpen ? "open" : ""}>
           <summary class="card-header section-toggle__summary">
-            <span>Khoản chi theo ngày</span>
+            <span id="expensesHistoryTitle">Khoản chi theo ngày</span>
             <span class="filter-pill filter-pill--neutral" id="expensesCount">Chưa chọn</span>
           </summary>
           <div class="card-body section-card__body">
@@ -674,6 +724,7 @@ export async function renderExpensesPage() {
         if (nextPeriod === selectedPeriod) return;
         selectedPeriod = nextPeriod;
         selectedExpenseDate = "";
+        showAllMonthExpenses = false;
         liveExpenses = [];
         renderPage();
         bindEvents();
@@ -692,24 +743,31 @@ export async function renderExpensesPage() {
   }
 
   function bindEvents() {
+    byId("btnViewAllMonthExpenses")?.addEventListener("click", () => {
+      showAllMonthExpenses = true;
+      selectedExpenseDate = "";
+      if (byId("expenseDateFilter")) byId("expenseDateFilter").value = "";
+      syncExpenseView();
+    });
+
     byId("btnApplyExpenseDate")?.addEventListener("click", () => {
+      showAllMonthExpenses = false;
       selectedExpenseDate = byId("expenseDateFilter")?.value || "";
       syncExpenseView();
-      byId("btnResetExpenseDate").disabled = !selectedExpenseDate;
     });
 
     byId("expenseDateFilter")?.addEventListener("keydown", (event) => {
       if (event.key === "Enter") {
+        showAllMonthExpenses = false;
         selectedExpenseDate = event.target.value || "";
         syncExpenseView();
-        byId("btnResetExpenseDate").disabled = !selectedExpenseDate;
       }
     });
 
     byId("btnResetExpenseDate")?.addEventListener("click", () => {
       selectedExpenseDate = "";
+      showAllMonthExpenses = false;
       if (byId("expenseDateFilter")) byId("expenseDateFilter").value = "";
-      byId("btnResetExpenseDate").disabled = true;
       syncExpenseView();
     });
 
