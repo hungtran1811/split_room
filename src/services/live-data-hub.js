@@ -151,6 +151,19 @@ export function clearHistoricalCache(groupId, period) {
   historicalCache.clear();
 }
 
+export function getLiveMonthSnapshot() {
+  return {
+    expenses,
+    payments,
+    rent,
+    expensesReady,
+    paymentsReady,
+    rentReady,
+    groupId: activeGroupId,
+    period: activePeriod,
+  };
+}
+
 export function disposeLiveDataHub() {
   monthConsumers.clear();
   stopWatchers();

@@ -28,6 +28,13 @@ export function getMonthRange(period) {
   };
 }
 
+export function lastDayOfPeriod(period) {
+  const [year, month] = String(period || "").split("-").map(Number);
+  if (!year || !month) return "";
+  const day = String(new Date(year, month, 0).getDate()).padStart(2, "0");
+  return `${year}-${String(month).padStart(2, "0")}-${day}`;
+}
+
 function normalizeDocs(snapshot) {
   return snapshot.docs.map((docSnap) => ({
     id: docSnap.id,

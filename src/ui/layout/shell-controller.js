@@ -16,7 +16,7 @@ function renderPersistentShellMarkup() {
               type="button"
               class="shell__quick"
               id="globalQuickAction"
-              aria-label="Thêm nhanh"
+              aria-label="Ghi chi nhanh"
             >
               ${renderIcon("plus", { className: "icon", size: 18 })}
             </button>
@@ -28,7 +28,7 @@ function renderPersistentShellMarkup() {
       </div>
       <div id="mobileNavHost" class="shell__nav-host"></div>
       <div id="mobileNavSheetHost"></div>
-      <button type="button" class="shell__fab" id="globalQuickActionMobile" aria-label="Thêm nhanh">
+      <button type="button" class="shell__fab" id="globalQuickActionMobile" aria-label="Ghi chi nhanh">
         ${renderIcon("plus", { className: "icon", size: 24 })}
       </button>
     </div>

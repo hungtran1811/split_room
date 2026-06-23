@@ -37,6 +37,15 @@ import {
   buildWholeEqualShares,
   toWholeVnd,
 } from "../../domain/money/whole-vnd";
+import {
+  AMOUNT_PRESETS,
+  bindQuickEntryControls,
+  collectRecentNotes,
+  findLastRepeatableExpense,
+  rememberExpenseNote,
+  renderAmountPresetButtons,
+  renderNoteSuggestionChips,
+} from "../utils/expense-quick-entry";
 
 function byId(id) {
   return document.getElementById(id);
@@ -100,7 +109,6 @@ export async function renderExpensesPage() {
   }
   const groupId = state.groupId;
   const canManageEntries = state.canOperateMonth;
-  const composerOpenByDefault = true;
   const currentUserLabel = getCurrentUserLabel(state);
 
   function canAddExpenseNow() {
@@ -139,8 +147,65 @@ export async function renderExpensesPage() {
   let unsubProfile = null;
   let liveExpenses = [];
 
+  function refreshNoteSuggestions() {
+    const host = byId("noteSuggestions");
+    if (!host) return;
+    const notes = collectRecentNotes(liveExpenses);
+    host.innerHTML = renderNoteSuggestionChips(notes);
+    bindQuickEntryControls(host, {
+      onNoteSuggestion: (note) => {
+        const noteInput = byId("exNote");
+        if (noteInput) noteInput.value = note;
+      },
+    });
+  }
+
+  function focusExpenseComposer() {
+    const composer = byId("expenseComposerCard");
+    composer?.scrollIntoView({ behavior: "smooth", block: "start" });
+    requestAnimationFrame(() => byId("exAmount")?.focus());
+  }
+
+  function applyRepeatableExpense(expense) {
+    if (!expense) return;
+
+    byId("exAmount").value = String(expense.amount || "");
+    byId("exNote").value = expense.note || "";
+    byId("exPayer").value = expense.payerId || getMyMemberId();
+    byId("exDate").value = defaultExpenseDate(selectedPeriod);
+    document.querySelectorAll(".exPart").forEach((checkbox) => {
+      checkbox.checked = (expense.participants || ROSTER_IDS).includes(
+        checkbox.dataset.id,
+      );
+    });
+    byId("exEqual").checked = true;
+    syncParticipantChips();
+    renderDebtsInputs();
+    focusExpenseComposer();
+  }
+
   function setMessage(text = "") {
     byId("msg").textContent = text;
+  }
+
+  function bindComposerQuickEntry() {
+    const composer = byId("expenseComposerCard");
+    if (!composer) return;
+
+    bindQuickEntryControls(composer, {
+      onAmountPreset: (amount) => {
+        const amountInput = byId("exAmount");
+        if (amountInput) amountInput.value = String(amount);
+        if (byId("exEqual").checked) renderDebtsInputs();
+        else recalcTotals();
+      },
+      onNoteSuggestion: (note) => {
+        const noteInput = byId("exNote");
+        if (noteInput) noteInput.value = note;
+      },
+    });
+
+    refreshNoteSuggestions();
   }
 
   function visibleExpenses() {
@@ -208,6 +273,8 @@ export async function renderExpensesPage() {
       historyPanel.open = true;
       expenseListOpen = true;
     }
+
+    refreshNoteSuggestions();
   }
 
   function getParticipantIds() {
@@ -369,14 +436,13 @@ export async function renderExpensesPage() {
         message: "Đã lưu khoản chi.",
         variant: "success",
       });
+      rememberExpenseNote(note);
       resetForm();
       selectedExpenseDate = date;
       showAllMonthExpenses = false;
       expenseListOpen = true;
       syncExpenseView();
-      if (!composerOpenByDefault) {
-        byId("expenseComposer").open = false;
-      }
+      focusExpenseComposer();
     } catch (error) {
       const message = mapFirestoreError(error, "Lưu thất bại.");
       setMessage(message);
@@ -486,11 +552,7 @@ export async function renderExpensesPage() {
       .join("");
 
     wrap.querySelector("#btnEmptyAddExpense")?.addEventListener("click", () => {
-      const composer = byId("expenseComposer");
-      if (composer) {
-        composer.open = true;
-        composer.scrollIntoView({ behavior: "smooth", block: "start" });
-      }
+      focusExpenseComposer();
       if (selectedExpenseDate && byId("exDate")) {
         byId("exDate").value = selectedExpenseDate;
       }
@@ -601,10 +663,44 @@ export async function renderExpensesPage() {
           </div>
         </section>
 
-        <details class="card section-card" id="expenseComposer" ${composerOpenByDefault ? "open" : ""}>
-          <summary class="card-header">Thêm khoản chi</summary>
-          <div class="card-body section-card__body">
+        <section class="card section-card expense-composer" id="expenseComposerCard">
+          <div class="expense-composer__head">
+            <div>
+              <h2 class="expense-composer__title">Thêm khoản chi</h2>
+              <p class="expense-composer__subtitle">Nhập nhanh số tiền và ghi chú — chia đều mặc định.</p>
+            </div>
+            <button type="button" class="btn btn-outline-primary btn-sm" id="btnRepeatLastExpense">
+              Lặp khoản gần nhất
+            </button>
+          </div>
+
+          <div class="expense-composer__body">
             <div class="row g-3">
+              <div class="col-12">
+                <label class="form-label">Số tiền (VNĐ)</label>
+                <input
+                  id="exAmount"
+                  class="form-control expense-amount-input"
+                  inputmode="numeric"
+                  placeholder="VD: 100000"
+                  autocomplete="off"
+                />
+                <div class="quick-chip-row mt-2" id="amountPresets">
+                  ${renderAmountPresetButtons(AMOUNT_PRESETS)}
+                </div>
+              </div>
+
+              <div class="col-12">
+                <label class="form-label">Ghi chú</label>
+                <input id="exNote" class="form-control" placeholder="VD: Ăn uống, Đi chợ, ..." autocomplete="off" />
+                <div class="quick-chip-row mt-2" id="noteSuggestions"></div>
+              </div>
+            </div>
+          </div>
+
+          <details class="expense-composer__advanced" id="expenseAdvanced">
+            <summary>Tùy chọn nâng cao (ngày, người trả, chia chi tiết)</summary>
+            <div class="row g-3 pt-3">
               <div class="col-md-4">
                 <label class="form-label">Ngày ghi chi</label>
                 <input
@@ -618,16 +714,18 @@ export async function renderExpensesPage() {
               </div>
 
               <div class="col-md-4">
-                <label class="form-label">Số tiền (VNĐ)</label>
-                <input id="exAmount" class="form-control" placeholder="VD: 10000 hoặc 10.000"/>
-                <div class="form-text">Chỉ nhập số nguyên VND.</div>
-              </div>
-
-              <div class="col-md-4">
                 <label class="form-label">Người trả</label>
                 <select id="exPayer" class="form-select">
                   ${ROSTER.map((member) => `<option value="${member.id}">${member.name}</option>`).join("")}
                 </select>
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label">Chia tiền</label>
+                <div class="form-check mt-2">
+                  <input class="form-check-input" type="checkbox" id="exEqual" checked>
+                  <label class="form-check-label" for="exEqual">Chia đều</label>
+                </div>
               </div>
 
               <div class="col-12">
@@ -641,21 +739,6 @@ export async function renderExpensesPage() {
                       </label>
                     `,
                   ).join("")}
-                </div>
-                <div class="form-text">
-                  Nếu người trả cũng tham gia, cứ tick bình thường. Engine sẽ tự tính phần của người trả.
-                </div>
-              </div>
-
-              <div class="col-12">
-                <div class="d-flex align-items-center gap-3 flex-wrap">
-                  <div class="form-check">
-                    <input class="form-check-input" type="checkbox" id="exEqual" checked>
-                    <label class="form-check-label" for="exEqual">Chia đều</label>
-                  </div>
-                  <div class="small text-secondary">
-                    Bỏ tick để tùy chỉnh số tiền nợ cho từng người.
-                  </div>
                 </div>
               </div>
 
@@ -687,20 +770,15 @@ export async function renderExpensesPage() {
                   </div>
                 </div>
               </div>
-
-              <div class="col-12">
-                <label class="form-label">Ghi chú</label>
-                <input id="exNote" class="form-control" placeholder="VD: Ăn uống, Đi chợ, ..." />
-              </div>
-
-              <div class="col-12 d-flex flex-wrap gap-2 align-items-center">
-                <button id="btnSaveExpense" class="btn btn-primary">Lưu chi tiêu</button>
-                <button id="btnResetExpense" class="btn btn-outline-secondary">Nhập lại</button>
-                <div id="msg" class="small text-danger"></div>
-              </div>
             </div>
+          </details>
+
+          <div class="expense-composer__actions">
+            <button id="btnSaveExpense" class="btn btn-primary">Lưu chi tiêu</button>
+            <button id="btnResetExpense" class="btn btn-outline-secondary">Nhập lại</button>
+            <div id="msg" class="small text-danger"></div>
           </div>
-        </details>
+        </section>
 
         <details class="card section-card section-toggle card--compact" id="expensesHistory" ${expenseListOpen ? "open" : ""}>
           <summary class="card-header section-toggle__summary">
@@ -743,6 +821,21 @@ export async function renderExpensesPage() {
   }
 
   function bindEvents() {
+    bindComposerQuickEntry();
+
+    byId("btnRepeatLastExpense")?.addEventListener("click", () => {
+      const lastExpense = findLastRepeatableExpense(
+        liveExpenses,
+        getMyMemberId(),
+      );
+      if (!lastExpense) {
+        setMessage("Chưa có khoản chi nào để lặp lại.");
+        return;
+      }
+      setMessage("");
+      applyRepeatableExpense(lastExpense);
+    });
+
     byId("btnViewAllMonthExpenses")?.addEventListener("click", () => {
       showAllMonthExpenses = true;
       selectedExpenseDate = "";
@@ -821,6 +914,10 @@ export async function renderExpensesPage() {
   syncExpenseView();
   syncExpensePermissions();
   startWatch();
+
+  if (getRouteQuery().get("quick") === "1") {
+    focusExpenseComposer();
+  }
 
   unsubProfile = watchMyMemberProfile(groupId, state.user.uid, () => {
     syncExpensePermissions();

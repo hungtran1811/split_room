@@ -11,8 +11,10 @@
   --hero-debt: linear-gradient(135deg, #991b1b 0%, #dc2626 55%, #f87171 100%);
   --hero-pending: linear-gradient(135deg, #b45309 0%, #f59e0b 55%, #fcd34d 100%);
   --hero-settled: linear-gradient(135deg, #1e3a8a 0%, #2563eb 50%, #818cf8 100%);
-  --elev-1: 0 4px 20px rgba(12, 18, 34, 0.07);
-  --elev-2: 0 20px 50px rgba(12, 18, 34, 0.14);
+  --elev-1: 0 4px 24px rgba(12, 18, 34, 0.08);
+  --elev-2: 0 24px 56px rgba(12, 18, 34, 0.12);
+  --motion-fast: 0.15s ease;
+  --motion-medium: 0.24s ease;
   --glass-bg: rgba(255, 255, 255, 0.9);
   --glass-border: rgba(226, 232, 240, 0.9);
   --glass-blur: blur(14px);

@@ -1,6 +1,6 @@
 import { initializeApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
+import { getFirestore, enableIndexedDbPersistence } from "firebase/firestore";
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FB_API_KEY,
@@ -14,3 +14,15 @@ const firebaseConfig = {
 export const fbApp = initializeApp(firebaseConfig);
 export const auth = getAuth(fbApp);
 export const db = getFirestore(fbApp);
+
+if (typeof window !== "undefined") {
+  enableIndexedDbPersistence(db).catch((error) => {
+    if (error?.code === "failed-precondition") {
+      console.warn("[splitroom] Firestore persistence: multiple tabs open");
+      return;
+    }
+    if (error?.code === "unimplemented") {
+      console.warn("[splitroom] Firestore persistence not supported");
+    }
+  });
+}

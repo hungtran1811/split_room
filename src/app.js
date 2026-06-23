@@ -14,15 +14,9 @@ import {
 } from "./core/state";
 import { normalizeMemberRole } from "./core/roles";
 import { renderLoginPage } from "./ui/pages/login.page";
-import { renderDashboardPage } from "./ui/pages/dashboard.page";
-import { renderExpensesPage } from "./ui/pages/expenses.page";
-import { renderPaymentsPage } from "./ui/pages/payments.page";
 import { getRoutePath } from "./core/routing";
 import { destroyAppShell } from "./ui/layout/shell-controller";
 import { resetPageMountCache } from "./ui/layout/page-mount";
-import { renderRentPage } from "./ui/pages/rent.page";
-import { renderReportsPage } from "./ui/pages/reports.page";
-import { renderAdminPage } from "./ui/pages/admin.page";
 import { renderAuthScreen } from "./ui/components/authScreen";
 import { unmountPrimaryNav } from "./ui/layout/navbar";
 import { ensureDefaultGroup } from "./services/group.service";
@@ -32,8 +26,32 @@ import {
   watchGroupMembers,
   watchMyMemberProfile,
 } from "./services/member.service";
-import { EMAIL_TO_MEMBER_ID, resolveMemberIdFromEmail } from "./config/members.map";
+import { resolveMemberIdFromEmail } from "./config/members.map";
 import { LEGACY_OWNER_UID } from "./config/constants";
+
+const pageLoaders = {
+  "#/dashboard": () =>
+    import("./ui/pages/dashboard.page.js").then((module) => module.renderDashboardPage),
+  "#/expenses": () =>
+    import("./ui/pages/expenses.page.js").then((module) => module.renderExpensesPage),
+  "#/payments": () =>
+    import("./ui/pages/payments.page.js").then((module) => module.renderPaymentsPage),
+  "#/rent": () =>
+    import("./ui/pages/rent.page.js").then((module) => module.renderRentPage),
+  "#/reports": () =>
+    import("./ui/pages/reports.page.js").then((module) => module.renderReportsPage),
+  "#/admin": () =>
+    import("./ui/pages/admin.page.js").then((module) => module.renderAdminPage),
+};
+
+function resolvePageLoader(route) {
+  if (route.startsWith("#/expenses")) return pageLoaders["#/expenses"];
+  if (route.startsWith("#/payments")) return pageLoaders["#/payments"];
+  if (route.startsWith("#/rent")) return pageLoaders["#/rent"];
+  if (route.startsWith("#/reports")) return pageLoaders["#/reports"];
+  if (route.startsWith("#/admin")) return pageLoaders["#/admin"];
+  return pageLoaders["#/dashboard"];
+}
 
 let authReady = false;
 let bootLoading = true;
@@ -223,32 +241,8 @@ async function render() {
   }
 
   const route = getRoute();
-  if (route.startsWith("#/expenses")) {
-    await renderExpensesPage();
-    return;
-  }
-
-  if (route.startsWith("#/payments")) {
-    await renderPaymentsPage();
-    return;
-  }
-
-  if (route.startsWith("#/rent")) {
-    await renderRentPage();
-    return;
-  }
-
-  if (route.startsWith("#/reports")) {
-    await renderReportsPage();
-    return;
-  }
-
-  if (route.startsWith("#/admin")) {
-    await renderAdminPage();
-    return;
-  }
-
-  renderDashboardPage();
+  const renderPage = await resolvePageLoader(route)();
+  await renderPage();
 }
 
 async function initAuthFlow() {

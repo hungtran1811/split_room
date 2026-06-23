@@ -3,6 +3,7 @@ import {
   bindPeriodControls,
   updatePeriodUi,
 } from "../controllers/period.controller";
+import { openQuickExpenseSheet } from "../components/quickExpenseSheet";
 import { openQuickActionSheet } from "../components/bottomSheet";
 import {
   ensureAppShell,
@@ -30,7 +31,12 @@ function bindGlobalQuickActions() {
     if (!trigger) return;
 
     event.preventDefault();
-    openQuickActionSheet();
+    if (event.altKey) {
+      openQuickActionSheet();
+      return;
+    }
+
+    openQuickExpenseSheet();
   });
 }
 

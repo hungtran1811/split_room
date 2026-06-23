@@ -10,6 +10,7 @@ import "./styles/dashboard.css";
 import "./styles/payments.css";
 import "./styles/reports.css";
 import "./styles/components.css";
+import "./styles/expenses.css";
 import { startApp } from "./app";
 
 startApp();

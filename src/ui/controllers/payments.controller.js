@@ -16,7 +16,9 @@ import { copySettlementReminder } from "../utils/settlement-message";
 import {
   defaultPaymentDateForPeriod,
   formatPaymentVND,
-  payableSettlementAmount,
+  parseSettlementAction,
+  paymentDateBoundsForPeriod,
+  paymentDateHelpForPeriod,
 } from "../views/payments.view";
 
 export function bindPaymentsActions({
@@ -47,85 +49,83 @@ export function bindPaymentsActions({
   });
 }
 
+function openSettlementPaymentModal({
+  actionValue,
+  viewingPeriod,
+  groupId,
+  lockAmount = false,
+  title,
+  defaultNote,
+}) {
+  const { fromId, toId, amount, debtPeriod } = parseSettlementAction(
+    actionValue,
+    viewingPeriod,
+  );
+  const { minDate, maxDate } = paymentDateBoundsForPeriod(debtPeriod);
+  const defaultDate = defaultPaymentDateForPeriod(debtPeriod);
+
+  openPaymentModal({
+    fromName: nameOf(fromId),
+    toName: nameOf(toId),
+    amount,
+    lockAmount,
+    maxAmount: lockAmount ? null : amount,
+    defaultNote,
+    defaultDate,
+    minDate,
+    maxDate,
+    dateHelp: paymentDateHelpForPeriod(debtPeriod),
+    parseVndInput,
+    title,
+    onSubmit: async ({ amount: paidAmount, note, date }) => {
+      try {
+        await addPayment(groupId, {
+          fromId,
+          toId,
+          amount: paidAmount,
+          date,
+          note,
+          createdBy: state.user.uid,
+        });
+        showToast({
+          title: "Thành công",
+          message: "Đã ghi nhận thanh toán.",
+          variant: "success",
+        });
+      } catch (error) {
+        throw new Error(
+          mapFirestoreError(error, "Không thể ghi nhận thanh toán."),
+        );
+      }
+    },
+  });
+}
+
 function bindSettlementButtons({ root, groupId, period, canOperate }) {
   if (!canOperate) return;
 
   root.querySelectorAll("[data-pay-full]").forEach((button) => {
     button.addEventListener("click", () => {
-      const [fromId, toId, amountString] = button
-        .getAttribute("data-pay-full")
-        .split("|");
-      const amount = payableSettlementAmount(amountString);
-
-      openPaymentModal({
-        fromName: nameOf(fromId),
-        toName: nameOf(toId),
-        amount,
+      openSettlementPaymentModal({
+        actionValue: button.getAttribute("data-pay-full"),
+        viewingPeriod: period,
+        groupId,
         lockAmount: true,
-        defaultNote: "Trả đủ theo cấn trừ",
-        parseVndInput,
         title: "Ghi nhận trả đủ",
-        onSubmit: async ({ amount: paidAmount, note }) => {
-          try {
-            await addPayment(groupId, {
-              fromId,
-              toId,
-              amount: paidAmount,
-              date: defaultPaymentDateForPeriod(period),
-              note,
-              createdBy: state.user.uid,
-            });
-            showToast({
-              title: "Thành công",
-              message: "Đã ghi nhận thanh toán.",
-              variant: "success",
-            });
-          } catch (error) {
-            throw new Error(
-              mapFirestoreError(error, "Không thể ghi nhận thanh toán."),
-            );
-          }
-        },
+        defaultNote: "Trả đủ theo cấn trừ",
       });
     });
   });
 
   root.querySelectorAll("[data-pay-part]").forEach((button) => {
     button.addEventListener("click", () => {
-      const [fromId, toId, amountString] = button
-        .getAttribute("data-pay-part")
-        .split("|");
-      const amount = payableSettlementAmount(amountString);
-
-      openPaymentModal({
-        fromName: nameOf(fromId),
-        toName: nameOf(toId),
-        amount,
-        maxAmount: amount,
-        defaultNote: "Trả một phần theo cấn trừ",
-        parseVndInput,
+      openSettlementPaymentModal({
+        actionValue: button.getAttribute("data-pay-part"),
+        viewingPeriod: period,
+        groupId,
+        lockAmount: false,
         title: "Ghi nhận trả một phần",
-        onSubmit: async ({ amount: paidAmount, note }) => {
-          try {
-            await addPayment(groupId, {
-              fromId,
-              toId,
-              amount: paidAmount,
-              date: defaultPaymentDateForPeriod(period),
-              note,
-              createdBy: state.user.uid,
-            });
-            showToast({
-              title: "Thành công",
-              message: "Đã ghi nhận thanh toán.",
-              variant: "success",
-            });
-          } catch (error) {
-            throw new Error(
-              mapFirestoreError(error, "Không thể ghi nhận thanh toán."),
-            );
-          }
-        },
+        defaultNote: "Trả một phần theo cấn trừ",
       });
     });
   });

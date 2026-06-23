@@ -4,7 +4,7 @@ import { ROSTER, nameOf } from "../../config/roster";
 import { getCurrentUserLabel, getUserLabel } from "../../core/display-name";
 import { formatVND } from "../../config/i18n";
 import { buildMonthlySettlementView } from "../../domain/matrix/compute";
-import { getMonthRange } from "../../services/month-ops.service";
+import { getMonthRange, lastDayOfPeriod } from "../../services/month-ops.service";
 import { renderMatrixTable } from "../components/matrixTable";
 import { renderIconButton, renderListRow } from "../components/listRow";
 import { renderMetricGrid } from "../components/metricTile";
@@ -42,8 +42,46 @@ export function payableSettlementAmount(amount) {
   return Math.max(0, roundWhole(amount));
 }
 
-export function settlementActionValue(item) {
-  return `${item.fromId}|${item.toId}|${payableSettlementAmount(item.amount)}`;
+export function settlementActionValue(item, debtPeriod = "") {
+  const period = debtPeriod ? `|${debtPeriod}` : "";
+  return `${item.fromId}|${item.toId}|${payableSettlementAmount(item.amount)}${period}`;
+}
+
+export function parseSettlementAction(value, viewingPeriod = "") {
+  const parts = String(value || "").split("|");
+  const [fromId, toId, amountString, debtPeriod] = parts;
+
+  return {
+    fromId: fromId || "",
+    toId: toId || "",
+    amount: payableSettlementAmount(amountString),
+    debtPeriod: debtPeriod || viewingPeriod || "",
+  };
+}
+
+export function paymentDateBoundsForPeriod(period) {
+  const { start, end } = getMonthRange(period);
+  const lastDay = lastDayOfPeriod(period);
+  return {
+    minDate: start,
+    maxDate: lastDay,
+    exclusiveEnd: end,
+  };
+}
+
+export function isPaymentDateInPeriod(date, period) {
+  const { minDate, exclusiveEnd } = paymentDateBoundsForPeriod(period);
+  const value = String(date || "");
+  return value >= minDate && value < exclusiveEnd;
+}
+
+export function paymentDateHelpForPeriod(period) {
+  const defaultDate = defaultPaymentDateForPeriod(period);
+  const today = todayYmd();
+  if (defaultDate === today) {
+    return "Mặc định hôm nay — có thể sửa trong tháng này.";
+  }
+  return `Mặc định cuối tháng ${formatPeriodLabel(period).toLowerCase()} — có thể sửa trong tháng đó.`;
 }
 
 function sumAmount(items = []) {
@@ -61,7 +99,7 @@ function todayYmd() {
 export function defaultPaymentDateForPeriod(period) {
   const today = todayYmd();
   if (today.startsWith(`${period}-`)) return today;
-  return `${period}-01`;
+  return lastDayOfPeriod(period);
 }
 
 function formatPeriodLabel(period) {
@@ -258,7 +296,7 @@ function renderSummaryCards(summary) {
   );
 }
 
-function renderSettlementList(items, canOperateMonth) {
+function renderSettlementList(items, canOperateMonth, debtPeriod = "") {
   if (!items.length) {
     return `<div class="empty-state empty-state--compact"><div class="empty-state__title">Đã cân bằng</div></div>`;
   }
@@ -269,13 +307,13 @@ function renderSettlementList(items, canOperateMonth) {
         .map((item) => {
           const actions = canOperateMonth
             ? `
-              <button class="btn btn-primary btn-sm" data-pay-full="${settlementActionValue(item)}">Đủ</button>
-              <button class="btn btn-outline-secondary btn-sm" data-pay-part="${settlementActionValue(item)}">Một phần</button>
+              <button class="btn btn-primary btn-sm" data-pay-full="${settlementActionValue(item, debtPeriod)}">Đủ</button>
+              <button class="btn btn-outline-secondary btn-sm" data-pay-part="${settlementActionValue(item, debtPeriod)}">Một phần</button>
               ${renderIconButton({
                 icon: "copy",
                 label: "Copy",
                 variant: "outline-secondary",
-                dataAttrs: { "copy-settlement": settlementActionValue(item) },
+                dataAttrs: { "copy-settlement": settlementActionValue(item, debtPeriod) },
               })}
             `
             : "";
@@ -334,10 +372,10 @@ function renderPreviousDebtByMonth(timeline, canOperateMonth) {
                                         canOperateMonth
                                           ? `
                                             <div class="d-flex flex-wrap gap-2">
-                                              <button class="btn ui-action-pill ui-action-pill--primary section-cta" data-pay-full="${settlementActionValue(item)}">
+                                              <button class="btn ui-action-pill ui-action-pill--primary section-cta" data-pay-full="${settlementActionValue(item, entry.period)}">
                                                 Trả đủ
                                               </button>
-                                              <button class="btn ui-action-pill ui-action-pill--secondary section-cta" data-pay-part="${settlementActionValue(item)}">
+                                              <button class="btn ui-action-pill ui-action-pill--secondary section-cta" data-pay-part="${settlementActionValue(item, entry.period)}">
                                                 Trả một phần
                                               </button>
                                             </div>
@@ -499,6 +537,7 @@ function renderSuggestTab({
   previousDebtByMonth,
   monthSettlement,
   canOperate,
+  period,
 }) {
   return `
     <div class="payments-page__panel">
@@ -512,7 +551,7 @@ function renderSuggestTab({
               : ""
           }
         </div>
-        ${renderSettlementList(monthSettlement.settlementPlan, canOperate)}
+        ${renderSettlementList(monthSettlement.settlementPlan, canOperate, period)}
       </section>
       ${
         previousDebtByMonth.length
@@ -581,6 +620,7 @@ export function renderTabPanels({
     previousDebtByMonth,
     monthSettlement,
     canOperate,
+    period,
   });
 }
 

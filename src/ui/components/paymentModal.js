@@ -64,6 +64,8 @@ export function ensurePaymentModal() {
  * - maxAmount: number => giới hạn không vượt (Trả một phần)
  * - defaultNote: string
  * - defaultDate: string (YYYY-MM-DD)
+ * - minDate: string (YYYY-MM-DD)
+ * - maxDate: string (YYYY-MM-DD)
  * - dateHelp: string
  * - title: string
  */
@@ -77,6 +79,8 @@ export function openPaymentModal({
   maxAmount = null,
   defaultNote = "",
   defaultDate = "",
+  minDate = "",
+  maxDate = "",
   dateHelp = "",
   title = "Ghi nhận thanh toán",
 }) {
@@ -116,6 +120,16 @@ export function openPaymentModal({
     : "Chỉ nhập số nguyên, ví dụ: 10.000";
 
   dateEl.value = defaultDate || "";
+  if (minDate) {
+    dateEl.min = minDate;
+  } else {
+    dateEl.removeAttribute("min");
+  }
+  if (maxDate) {
+    dateEl.max = maxDate;
+  } else {
+    dateEl.removeAttribute("max");
+  }
   dateHelpEl.textContent =
     dateHelp || "Bạn có thể sửa ngày ghi nhận nếu cần.";
 
@@ -135,6 +149,12 @@ export function openPaymentModal({
 
       const date = String(dateEl.value || defaultDate || "").trim();
       if (!date) throw new Error("Ngày ghi nhận không hợp lệ.");
+      if (minDate && date < minDate) {
+        throw new Error("Ngày ghi nhận phải thuộc tháng nguồn nợ.");
+      }
+      if (maxDate && date > maxDate) {
+        throw new Error("Ngày ghi nhận phải thuộc tháng nguồn nợ.");
+      }
 
       if (lockAmount) {
         if (amt !== amount) {
