@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { lastDayOfPeriod } from "../src/services/month-ops.service.js";
+import { lastDayOfPeriod } from "../src/core/period.js";
 import {
   buildPreviousDebtByMonth,
   defaultPaymentDateForPeriod,

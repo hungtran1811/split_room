@@ -11,11 +11,15 @@ const firebaseConfig = {
   appId: import.meta.env.VITE_FB_APP_ID,
 };
 
-export const fbApp = initializeApp(firebaseConfig);
-export const auth = getAuth(fbApp);
-export const db = getFirestore(fbApp);
+const hasFirebaseConfig = Boolean(
+  firebaseConfig.apiKey && firebaseConfig.projectId,
+);
 
-if (typeof window !== "undefined") {
+export const fbApp = hasFirebaseConfig ? initializeApp(firebaseConfig) : null;
+export const auth = fbApp ? getAuth(fbApp) : null;
+export const db = fbApp ? getFirestore(fbApp) : null;
+
+if (fbApp && db && typeof window !== "undefined") {
   enableIndexedDbPersistence(db).catch((error) => {
     if (error?.code === "failed-precondition") {
       console.warn("[splitroom] Firestore persistence: multiple tabs open");

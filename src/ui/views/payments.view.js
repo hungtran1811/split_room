@@ -4,7 +4,7 @@ import { ROSTER, nameOf } from "../../config/roster";
 import { getCurrentUserLabel, getUserLabel } from "../../core/display-name";
 import { formatVND } from "../../config/i18n";
 import { buildMonthlySettlementView } from "../../domain/matrix/compute";
-import { getMonthRange, lastDayOfPeriod } from "../../services/month-ops.service";
+import { getMonthRange, lastDayOfPeriod } from "../../core/period";
 import { renderMatrixTable } from "../components/matrixTable";
 import { renderIconButton, renderListRow } from "../components/listRow";
 import { renderMetricGrid } from "../components/metricTile";
