@@ -24,7 +24,7 @@ import {
 import { getMonthRange } from "../../services/month-ops.service";
 import { subscribeLiveMonthData } from "../../services/live-data-hub";
 import { watchMyMemberProfile } from "../../services/member.service";
-import { renderIconButton, renderListRow } from "../components/listRow";
+import { renderIconButton } from "../components/listRow";
 import { renderMoneyStatCard } from "../components/metricTile";
 import {
   getVisibleExpenses,
@@ -89,10 +89,44 @@ function creatorLabel(uid) {
   return uid;
 }
 
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+}
+
+function renderExpenseDebtors(debts) {
+  const entries = Object.entries(debts || {}).filter(
+    ([, amount]) => Number(amount) > 0,
+  );
+
+  if (!entries.length) {
+    return '<span class="expense-item__debtor expense-item__debtor--empty">Không có người nợ</span>';
+  }
+
+  return entries
+    .map(
+      ([memberId, amount]) => `
+        <span class="expense-item__debtor">
+          ${escapeHtml(nameOf(memberId))}
+          <strong>${formatVND(amount)}</strong>
+        </span>
+      `,
+    )
+    .join("");
+}
+
 function defaultExpenseDate(period) {
   const today = todayYmd();
   if (today.slice(0, 7) === period) return today;
   return expenseDateForPeriod(period);
+}
+
+function defaultListDate(period) {
+  const today = todayYmd();
+  return today.slice(0, 7) === period ? today : "";
 }
 
 export async function renderExpensesPage() {
@@ -140,9 +174,10 @@ export async function renderExpensesPage() {
     }
   }
   let selectedPeriod = getSelectedPeriod();
-  let selectedExpenseDate = getRouteQuery().get("date") || "";
+  let selectedExpenseDate =
+    getRouteQuery().get("date") || defaultListDate(selectedPeriod);
   let showAllMonthExpenses = false;
-  let expenseListOpen = false;
+  let expenseListOpen = true;
   let unsubscribeExpenses = null;
   let unsubProfile = null;
   let liveExpenses = [];
@@ -457,6 +492,51 @@ export async function renderExpensesPage() {
     }
   }
 
+  function renderExpenseItem(expense) {
+    const actions = canManageEntries
+      ? `
+        ${renderIconButton({
+          icon: "edit",
+          label: "Sửa",
+          variant: "outline-secondary",
+          dataAttrs: { "edit-expense": expense.id },
+        })}
+        ${renderIconButton({
+          icon: "trash",
+          label: "Xóa",
+          variant: "outline-danger",
+          dataAttrs: { "delete-expense": expense.id },
+        })}
+      `
+      : "";
+
+    return `
+      <article class="expense-item" data-expense-id="${escapeHtml(expense.id)}">
+        <div class="expense-item__main">
+          <div class="expense-item__note">${escapeHtml(expense.note || "Không có ghi chú")}</div>
+          <div class="expense-item__meta">
+            <span class="expense-item__tag">
+              <span class="expense-item__tag-label">Người ghi</span>
+              <strong>${escapeHtml(creatorLabel(expense.createdBy))}</strong>
+            </span>
+            <span class="expense-item__tag">
+              <span class="expense-item__tag-label">Người chi</span>
+              <strong>${escapeHtml(nameOf(expense.payerId))}</strong>
+            </span>
+          </div>
+          <div class="expense-item__debtors">
+            <span class="expense-item__debtors-label">Người nợ</span>
+            <span class="expense-item__debtors-list">${renderExpenseDebtors(expense.debts)}</span>
+          </div>
+        </div>
+        <div class="expense-item__side">
+          <div class="expense-item__amount">${formatVND(expense.amount)}</div>
+          ${actions ? `<div class="expense-item__actions">${actions}</div>` : ""}
+        </div>
+      </article>
+    `;
+  }
+
   function renderExpensesList(expenses) {
     const wrap = byId("expensesList");
     if (!wrap) return;
@@ -510,41 +590,13 @@ export async function renderExpensesPage() {
       return;
     }
 
-    const today = todayYmd();
     wrap.innerHTML = groupExpensesByDate(expenses)
       .map(
         ({ date, items }) => `
           <section class="expense-day-group">
             <div class="date-group__header">${date} • ${items.length} khoản</div>
             <div class="stack-list expense-day-group__list">
-              ${items
-                .map((expense) => {
-                  const actions = canManageEntries
-                    ? `
-                      ${renderIconButton({
-                        icon: "edit",
-                        label: "Sửa",
-                        variant: "outline-secondary",
-                        dataAttrs: { "edit-expense": expense.id },
-                      })}
-                      ${renderIconButton({
-                        icon: "trash",
-                        label: "Xóa",
-                        variant: "outline-danger",
-                        dataAttrs: { "delete-expense": expense.id },
-                      })}
-                    `
-                    : "";
-
-                  return renderListRow({
-                    title: nameOf(expense.payerId),
-                    subtitle: expense.note || "Không có ghi chú",
-                    amount: formatVND(expense.amount),
-                    actions,
-                    dataAttrs: { "expense-id": expense.id },
-                  });
-                })
-                .join("")}
+              ${items.map((expense) => renderExpenseItem(expense)).join("")}
             </div>
           </section>
         `,
@@ -605,11 +657,22 @@ export async function renderExpensesPage() {
         if (!expense) return;
 
         openExpenseEditModal({
-          title: "Sửa chi tiêu (ngày/ghi chú)",
+          title: "Sửa chi tiêu",
           date: expense.date,
           note: expense.note || "",
-          onSubmit: async ({ date, note }) => {
-            await updateExpense(groupId, expense.id, { date, note });
+          amount: expense.amount || 0,
+          payerId: expense.payerId || "",
+          participants: expense.participants || [],
+          debts: expense.debts || {},
+          onSubmit: async ({ date, note, amount, payerId, participants, debts }) => {
+            await updateExpense(groupId, expense.id, {
+              date,
+              note,
+              amount,
+              payerId,
+              participants,
+              debts,
+            });
             showToast({
               title: "Thành công",
               message: "Đã cập nhật chi tiêu.",
@@ -634,35 +697,6 @@ export async function renderExpensesPage() {
 
         <div id="expensePermissionBanner" class="readonly-banner" hidden></div>
 
-        <section class="card section-card expense-filter">
-          <div class="card-body section-card__body">
-            <div class="expense-filter__row">
-              <div class="expense-filter__field">
-                <label class="form-label" for="expenseDateFilter">Tìm theo ngày</label>
-                <input
-                  id="expenseDateFilter"
-                  type="date"
-                  class="form-control"
-                  value="${selectedExpenseDate}"
-                  min="${getMonthRange(selectedPeriod).start}"
-                  max="${lastDayOfPeriod(selectedPeriod)}"
-                />
-              </div>
-              <div class="expense-filter__actions">
-                <button type="button" class="btn btn-outline-primary" id="btnViewAllMonthExpenses">
-                  Xem cả tháng
-                </button>
-                <button type="button" class="btn btn-primary" id="btnApplyExpenseDate">
-                  Xem ngày
-                </button>
-                <button type="button" class="btn btn-outline-secondary" id="btnResetExpenseDate" disabled>
-                  Bỏ lọc
-                </button>
-              </div>
-            </div>
-          </div>
-        </section>
-
         <section class="card section-card expense-composer" id="expenseComposerCard">
           <div class="expense-composer__head">
             <div>
@@ -676,8 +710,8 @@ export async function renderExpensesPage() {
 
           <div class="expense-composer__body">
             <div class="row g-3">
-              <div class="col-12">
-                <label class="form-label">Số tiền (VNĐ)</label>
+              <div class="col-12 col-md-6">
+                <label class="form-label" for="exAmount">Số tiền (VNĐ)</label>
                 <input
                   id="exAmount"
                   class="form-control expense-amount-input"
@@ -690,19 +724,8 @@ export async function renderExpensesPage() {
                 </div>
               </div>
 
-              <div class="col-12">
-                <label class="form-label">Ghi chú</label>
-                <input id="exNote" class="form-control" placeholder="VD: Ăn uống, Đi chợ, ..." autocomplete="off" />
-                <div class="quick-chip-row mt-2" id="noteSuggestions"></div>
-              </div>
-            </div>
-          </div>
-
-          <details class="expense-composer__advanced" id="expenseAdvanced">
-            <summary>Tùy chọn nâng cao (ngày, người trả, chia chi tiết)</summary>
-            <div class="row g-3 pt-3">
-              <div class="col-md-4">
-                <label class="form-label">Ngày ghi chi</label>
+              <div class="col-6 col-md-3">
+                <label class="form-label" for="exDate">Ngày ghi chi</label>
                 <input
                   id="exDate"
                   type="date"
@@ -713,24 +736,28 @@ export async function renderExpensesPage() {
                 />
               </div>
 
-              <div class="col-md-4">
-                <label class="form-label">Người trả</label>
+              <div class="col-6 col-md-3">
+                <label class="form-label" for="exPayer">Người trả</label>
                 <select id="exPayer" class="form-select">
                   ${ROSTER.map((member) => `<option value="${member.id}">${member.name}</option>`).join("")}
                 </select>
               </div>
 
-              <div class="col-md-4">
-                <label class="form-label">Chia tiền</label>
-                <div class="form-check mt-2">
-                  <input class="form-check-input" type="checkbox" id="exEqual" checked>
-                  <label class="form-check-label" for="exEqual">Chia đều</label>
-                </div>
+              <div class="col-12">
+                <label class="form-label" for="exNote">Ghi chú</label>
+                <input id="exNote" class="form-control" placeholder="VD: Ăn uống, Đi chợ, ..." autocomplete="off" />
+                <div class="quick-chip-row mt-2" id="noteSuggestions"></div>
               </div>
 
               <div class="col-12">
-                <label class="form-label mb-2">Người tham gia</label>
-                <div class="d-flex flex-wrap gap-2">
+                <div class="expense-composer__split-head">
+                  <label class="form-label mb-0">Người tham gia</label>
+                  <div class="form-check form-switch mb-0">
+                    <input class="form-check-input" type="checkbox" id="exEqual" checked>
+                    <label class="form-check-label" for="exEqual">Chia đều</label>
+                  </div>
+                </div>
+                <div class="d-flex flex-wrap gap-2 mt-2">
                   ${ROSTER.map(
                     (member) => `
                       <label class="chip-toggle is-active" for="p_${member.id}">
@@ -743,14 +770,14 @@ export async function renderExpensesPage() {
               </div>
 
               <div class="col-12">
-                <div class="card">
+                <div class="card expense-composer__split-card">
                   <div class="card-body section-card__body">
                     ${renderSectionHeader({
                       title: "Phân bổ nợ",
                       subtitle: "Phần chia chi tiết cho từng người trong khoản chi này.",
                     })}
                     <div id="debtsBox" class="row g-3"></div>
-                    <div class="money-grid money-grid--3">
+                    <div class="money-grid money-grid--3 mt-3">
                       ${renderMoneyStatCard({
                         label: "Tổng nợ người khác",
                         value: '<span id="sumDebts">0 đ</span>',
@@ -771,7 +798,7 @@ export async function renderExpensesPage() {
                 </div>
               </div>
             </div>
-          </details>
+          </div>
 
           <div class="expense-composer__actions">
             <button id="btnSaveExpense" class="btn btn-primary">Lưu chi tiêu</button>
@@ -786,7 +813,33 @@ export async function renderExpensesPage() {
             <span class="filter-pill filter-pill--neutral" id="expensesCount">Chưa chọn</span>
           </summary>
           <div class="card-body section-card__body">
-            <div id="expensesList"></div>
+            <div class="expense-filter">
+              <div class="expense-filter__row">
+                <div class="expense-filter__field">
+                  <label class="form-label" for="expenseDateFilter">Tìm theo ngày</label>
+                  <input
+                    id="expenseDateFilter"
+                    type="date"
+                    class="form-control"
+                    value="${selectedExpenseDate}"
+                    min="${getMonthRange(selectedPeriod).start}"
+                    max="${lastDayOfPeriod(selectedPeriod)}"
+                  />
+                </div>
+                <div class="expense-filter__actions">
+                  <button type="button" class="btn btn-outline-primary" id="btnViewAllMonthExpenses">
+                    Xem cả tháng
+                  </button>
+                  <button type="button" class="btn btn-primary" id="btnApplyExpenseDate">
+                    Xem ngày
+                  </button>
+                  <button type="button" class="btn btn-outline-secondary" id="btnResetExpenseDate" disabled>
+                    Bỏ lọc
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div id="expensesList" class="mt-3"></div>
           </div>
         </details>
 
@@ -801,7 +854,7 @@ export async function renderExpensesPage() {
       onPeriodChange: (nextPeriod) => {
         if (nextPeriod === selectedPeriod) return;
         selectedPeriod = nextPeriod;
-        selectedExpenseDate = "";
+        selectedExpenseDate = defaultListDate(nextPeriod);
         showAllMonthExpenses = false;
         liveExpenses = [];
         renderPage();
