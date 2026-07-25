@@ -6,37 +6,12 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    function authEmail() {
-      return request.auth.token.email;
-    }
-
-    function allowedEmails() {
-      return [
-        "hungtran00.nt@gmail.com",
-        "thanhthuyhuynh1712@gmail.com",
-        "huynhnhatthinh.2003@gmail.com",
-        "huynhthanhthao14062001@gmail.com"
-      ];
-    }
-
-    function ownerEmail() {
-      return "hungtran00.nt@gmail.com";
-    }
-
-    function ownerMemberId() {
-      return "hung";
-    }
-
-    function isAllowedEmail() {
-      return signedIn() && authEmail() in allowedEmails();
+    function groupDocPath(groupId) {
+      return /databases/$(database)/documents/groups/$(groupId);
     }
 
     function memberDocPath(groupId, uid) {
       return /databases/$(database)/documents/groups/$(groupId)/members/$(uid);
-    }
-
-    function legacyOwnerUid() {
-      return "8tgX0c2IBbTx0k0oIZgn7w2H12b2";
     }
 
     function memberExists(groupId, uid) {
@@ -48,34 +23,17 @@ service cloud.firestore {
     }
 
     function isGroupMember(groupId) {
-      return signedIn()
-        && isAllowedEmail()
-        && memberExists(groupId, request.auth.uid);
+      return signedIn() && memberExists(groupId, request.auth.uid);
     }
 
     function isGroupOwner(groupId) {
-      return signedIn()
-        && isAllowedEmail()
-        && (
-          request.auth.uid == legacyOwnerUid()
-          || authEmail() == ownerEmail()
-          || (
-            memberExists(groupId, request.auth.uid)
-            && memberDoc(groupId, request.auth.uid).data.role == "owner"
-          )
-        );
+      return isGroupMember(groupId)
+        && memberDoc(groupId, request.auth.uid).data.role == "owner";
     }
 
     function isGroupOperator(groupId) {
-      return signedIn()
-        && isAllowedEmail()
-        && (
-          isGroupOwner(groupId)
-          || (
-            memberExists(groupId, request.auth.uid)
-            && memberDoc(groupId, request.auth.uid).data.role == "admin"
-          )
-        );
+      return isGroupMember(groupId)
+        && memberDoc(groupId, request.auth.uid).data.role in ["owner", "admin"];
     }
 
     function periodRegex() {
@@ -86,23 +44,52 @@ service cloud.firestore {
       return role in ["owner", "admin", "member"];
     }
 
-    function validMemberWrite(uid) {
-      return request.resource.data.uid == uid
-        && request.resource.data.memberId is string
-        && request.resource.data.memberId.size() > 0
-        && request.resource.data.email is string
-        && request.resource.data.email.size() > 0
-        && validRole(request.resource.data.role);
+    function validMemberData(data, uid) {
+      return data.uid == uid
+        && data.memberId is string
+        && data.memberId.size() > 0
+        && data.email is string
+        && data.email.size() > 0
+        && validRole(data.role);
     }
 
-    function validSelfCreateRole(uid) {
-      return request.resource.data.role == "member"
-        || (
-          request.resource.data.role == "owner"
-          && request.resource.data.memberId == ownerMemberId()
-          && request.resource.data.email == ownerEmail()
-          && (uid == legacyOwnerUid() || authEmail() == ownerEmail())
-        );
+    function validMemberWrite(uid) {
+      return validMemberData(request.resource.data, uid);
+    }
+
+    function memberIdentityUnchanged() {
+      return request.resource.data.uid == resource.data.uid
+        && request.resource.data.email == resource.data.email
+        && request.resource.data.memberId == resource.data.memberId;
+    }
+
+    function onlyUpdatesOwnProfile() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+        "displayName",
+        "photoURL",
+        "updatedAt"
+      ]);
+    }
+
+    // A new group must be created atomically with the creator's owner membership.
+    function validBootstrapGroupCreate(groupId) {
+      return signedIn()
+        && !exists(groupDocPath(groupId))
+        && existsAfter(memberDocPath(groupId, request.auth.uid))
+        && validMemberData(
+          getAfter(memberDocPath(groupId, request.auth.uid)).data,
+          request.auth.uid
+        )
+        && getAfter(memberDocPath(groupId, request.auth.uid)).data.role == "owner";
+    }
+
+    function validBootstrapOwnerMemberCreate(groupId, uid) {
+      return signedIn()
+        && request.auth.uid == uid
+        && !exists(groupDocPath(groupId))
+        && existsAfter(groupDocPath(groupId))
+        && validMemberWrite(uid)
+        && request.resource.data.role == "owner";
     }
 
     function rentAllowedKeys() {
@@ -167,47 +154,31 @@ service cloud.firestore {
     }
 
     match /groups/{groupId} {
-      allow read: if isAllowedEmail();
-      allow create: if isAllowedEmail();
+      allow read: if isGroupMember(groupId);
+      allow create: if validBootstrapGroupCreate(groupId);
       allow update, delete: if isGroupOwner(groupId);
 
       match /members/{uid} {
-        allow read: if isGroupMember(groupId)
-          || (signedIn() && isAllowedEmail() && request.auth.uid == uid);
+        allow read: if isGroupMember(groupId);
 
-        allow create: if isAllowedEmail()
-          && request.auth.uid == uid
-          && request.resource.data.email == request.auth.token.email
-          && validMemberWrite(uid)
-          && validSelfCreateRole(uid);
+        allow create: if (
+            isGroupOwner(groupId)
+            && validMemberWrite(uid)
+          )
+          || validBootstrapOwnerMemberCreate(groupId, uid);
 
         allow update: if (
             isGroupOwner(groupId)
             && validMemberWrite(uid)
-            && request.resource.data.uid == resource.data.uid
-            && request.resource.data.email == resource.data.email
-            && request.resource.data.memberId == resource.data.memberId
+            && memberIdentityUnchanged()
           )
           || (
-            signedIn()
-            && isAllowedEmail()
+            isGroupMember(groupId)
             && request.auth.uid == uid
-            && request.resource.data.uid == uid
-            && request.resource.data.memberId == resource.data.memberId
-            && request.resource.data.email == resource.data.email
-            && (
-              request.resource.data.role == resource.data.role
-              || (
-                !resource.data.keys().hasAny(["role"])
-                && request.resource.data.role == "member"
-              )
-              || (
-                authEmail() == ownerEmail()
-                && request.resource.data.email == ownerEmail()
-                && request.resource.data.memberId == ownerMemberId()
-                && request.resource.data.role == "owner"
-              )
-            )
+            && validMemberWrite(uid)
+            && memberIdentityUnchanged()
+            && request.resource.data.role == resource.data.role
+            && onlyUpdatesOwnProfile()
           );
 
         allow delete: if isGroupOwner(groupId);

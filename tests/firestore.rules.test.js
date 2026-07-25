@@ -6,16 +6,21 @@ import {
 } from "@firebase/rules-unit-testing";
 import fs from "node:fs";
 
-const OWNER_UID = "8tgX0c2IBbTx0k0oIZgn7w2H12b2";
-const ADMIN_UID = "backup-admin-uid";
+const OWNER_UID = "owner-uid";
+const ADMIN_UID = "admin-uid";
 const MEMBER_UID = "member-uid";
+const OUTSIDER_UID = "outsider-uid";
+const OTHER_OWNER_UID = "other-owner-uid";
+const NEW_MEMBER_UID = "new-member-uid";
+const GROUP_ID = "P102";
+const OTHER_GROUP_ID = "P202";
 
 let testEnv;
 
 function rentPayload(period, uid) {
   return {
     period,
-    payerId: "hung",
+    payerId: "owner",
     items: { rent: 4000000, wifi: 150000, other: 0 },
     total: 4850000,
     headcount: 4,
@@ -23,8 +28,8 @@ function rentPayload(period, uid) {
     electric: { oldKwh: 11214, newKwh: 11289, unitPrice: 4000 },
     computed: { waterCost: 400000, kwhUsed: 75, electricCost: 300000 },
     splitMode: "equal",
-    shares: { hung: 1326000, thao: 1787000, thinh: 1637000, thuy: 100000 },
-    paid: { hung: 0, thao: 0, thinh: 0, thuy: 0 },
+    shares: { owner: 1326000, admin: 1787000, member: 1637000, guest: 100000 },
+    paid: { owner: 0, admin: 0, member: 0, guest: 0 },
     note: "Tien nha thang 3",
     createdBy: uid,
   };
@@ -46,18 +51,18 @@ function periodPayload(period, uid) {
       settlementCount: 1,
     },
     snapshot: {
-      balances: { hung: 1000, thao: -1000 },
-      settlementPlan: [{ fromId: "thao", toId: "hung", amount: 1000 }],
+      balances: { owner: 1000, member: -1000 },
+      settlementPlan: [{ fromId: "member", toId: "owner", amount: 1000 }],
       rent: {
-        payerId: "hung",
+        payerId: "owner",
         total: 2000,
         collected: 1000,
         remaining: 1000,
       },
       members: [
         {
-          memberId: "hung",
-          name: "Hung",
+          memberId: "owner",
+          name: "Owner",
           netBalance: 1000,
           rentShare: 0,
           rentPaid: 0,
@@ -71,26 +76,57 @@ function periodPayload(period, uid) {
 function paymentPayload(uid, amount = 100000) {
   return {
     date: "2026-03-01",
-    fromId: "thao",
-    toId: "hung",
+    fromId: "member",
+    toId: "owner",
     amount,
     note: "Tra no",
     createdBy: uid,
   };
 }
 
-async function seedMember(uid, role, email, memberId) {
+function memberPayload(uid, role, memberId = uid) {
+  return {
+    uid,
+    email: `${uid}@example.test`,
+    memberId,
+    role,
+    displayName: memberId,
+    photoURL: "",
+  };
+}
+
+function authenticatedDb(uid) {
+  return testEnv.authenticatedContext(uid, {
+    email: `${uid}@example.test`,
+  }).firestore();
+}
+
+async function seedGroup(groupId, members) {
   await testEnv.withSecurityRulesDisabled(async (context) => {
-    await context.firestore().doc(`groups/P102/members/${uid}`).set({
-      uid,
-      email,
-      memberId,
-      role,
-      displayName: memberId,
-      photoURL: "",
+    const db = context.firestore();
+    await db.doc(`groups/${groupId}`).set({
+      name: groupId,
+      createdBy: members[0]?.uid || "seed",
     });
-    await context.firestore().doc("groups/P102").set({
-      name: "P102",
+
+    for (const member of members) {
+      await db.doc(`groups/${groupId}/members/${member.uid}`).set(member);
+    }
+  });
+}
+
+async function seedNestedDocs() {
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    const db = context.firestore();
+    await db.doc(`groups/${GROUP_ID}/rents/2026-03`).set(rentPayload("2026-03", OWNER_UID));
+    await db.doc(`groups/${GROUP_ID}/expenses/exp-seeded`).set({
+      date: "2026-03-15",
+      amount: 120000,
+      payerId: "member",
+      participants: ["member", "owner"],
+      debts: { owner: 60000 },
+      note: "An trua",
+      createdBy: MEMBER_UID,
     });
   });
 }
@@ -111,32 +147,88 @@ describe("firestore rules", () => {
 
   beforeEach(async () => {
     await testEnv.clearFirestore();
-    await seedMember(OWNER_UID, "owner", "hungtran00.nt@gmail.com", "hung");
-    await seedMember(
-      ADMIN_UID,
-      "admin",
-      "huynhnhatthinh.2003@gmail.com",
-      "thinh",
-    );
-    await seedMember(
-      MEMBER_UID,
-      "member",
-      "huynhthanhthao14062001@gmail.com",
-      "thao",
+    await seedGroup(GROUP_ID, [
+      memberPayload(OWNER_UID, "owner", "owner"),
+      memberPayload(ADMIN_UID, "admin", "admin"),
+      memberPayload(MEMBER_UID, "member", "member"),
+    ]);
+    await seedGroup(OTHER_GROUP_ID, [
+      memberPayload(OTHER_OWNER_UID, "owner", "other-owner"),
+    ]);
+  });
+
+  it("blocks anonymous users from reading groups and nested data", async () => {
+    await seedNestedDocs();
+    const anonymousDb = testEnv.unauthenticatedContext().firestore();
+
+    await assertFails(anonymousDb.doc(`groups/${GROUP_ID}`).get());
+    await assertFails(anonymousDb.doc(`groups/${GROUP_ID}/members/${OWNER_UID}`).get());
+    await assertFails(anonymousDb.doc(`groups/${GROUP_ID}/rents/2026-03`).get());
+  });
+
+  it("blocks outsiders from reading a group or self-joining it", async () => {
+    const outsiderDb = authenticatedDb(OUTSIDER_UID);
+
+    await assertFails(outsiderDb.doc(`groups/${GROUP_ID}`).get());
+    await assertFails(outsiderDb.doc(`groups/${GROUP_ID}/members/${OWNER_UID}`).get());
+    await assertFails(
+      outsiderDb.doc(`groups/${GROUP_ID}/members/${OUTSIDER_UID}`).set(
+        memberPayload(OUTSIDER_UID, "member", "outsider"),
+      ),
     );
   });
 
-  it("allows owner to update member roles and group config", async () => {
-    const ownerDb = testEnv.authenticatedContext(OWNER_UID, {
-      email: "hungtran00.nt@gmail.com",
-    }).firestore();
+  it("isolates data between groups", async () => {
+    const memberDb = authenticatedDb(MEMBER_UID);
+
+    await assertSucceeds(memberDb.doc(`groups/${GROUP_ID}`).get());
+    await assertFails(memberDb.doc(`groups/${OTHER_GROUP_ID}`).get());
+    await assertFails(
+      memberDb.doc(`groups/${OTHER_GROUP_ID}/members/${OTHER_OWNER_UID}`).get(),
+    );
+  });
+
+  it("allows a creator to bootstrap a group and owner membership in one atomic batch", async () => {
+    const creatorUid = "creator-uid";
+    const creatorDb = authenticatedDb(creatorUid);
+    const batch = creatorDb.batch();
+
+    batch.set(creatorDb.doc("groups/NEW"), {
+      name: "NEW",
+      createdBy: creatorUid,
+    });
+    batch.set(
+      creatorDb.doc(`groups/NEW/members/${creatorUid}`),
+      memberPayload(creatorUid, "owner", "creator"),
+    );
+
+    await assertSucceeds(batch.commit());
+    await assertSucceeds(creatorDb.doc("groups/NEW").get());
+  });
+
+  it("blocks group creation without an atomic owner membership", async () => {
+    const creatorDb = authenticatedDb("orphan-creator-uid");
+
+    await assertFails(
+      creatorDb.doc("groups/ORPHAN").set({
+        name: "ORPHAN",
+        createdBy: "orphan-creator-uid",
+      }),
+    );
+  });
+
+  it("allows owners to create members, update roles, and update group config", async () => {
+    const ownerDb = authenticatedDb(OWNER_UID);
 
     await assertSucceeds(
-      ownerDb.doc(`groups/P102/members/${MEMBER_UID}`).set(
+      ownerDb.doc(`groups/${GROUP_ID}/members/${NEW_MEMBER_UID}`).set(
+        memberPayload(NEW_MEMBER_UID, "member", "new-member"),
+      ),
+    );
+
+    await assertSucceeds(
+      ownerDb.doc(`groups/${GROUP_ID}/members/${MEMBER_UID}`).set(
         {
-          uid: MEMBER_UID,
-          email: "huynhthanhthao14062001@gmail.com",
-          memberId: "thao",
           role: "admin",
         },
         { merge: true },
@@ -144,7 +236,7 @@ describe("firestore rules", () => {
     );
 
     await assertSucceeds(
-      ownerDb.doc("groups/P102").set(
+      ownerDb.doc(`groups/${GROUP_ID}`).set(
         {
           updatedAt: "now",
         },
@@ -153,16 +245,36 @@ describe("firestore rules", () => {
     );
   });
 
+  it("blocks owners from changing immutable member identity fields", async () => {
+    const ownerDb = authenticatedDb(OWNER_UID);
+
+    await assertFails(
+      ownerDb.doc(`groups/${GROUP_ID}/members/${MEMBER_UID}`).set(
+        {
+          email: "changed@example.test",
+        },
+        { merge: true },
+      ),
+    );
+
+    await assertFails(
+      ownerDb.doc(`groups/${GROUP_ID}/members/${MEMBER_UID}`).set(
+        {
+          memberId: "changed-id",
+        },
+        { merge: true },
+      ),
+    );
+  });
+
   it("allows operators to create and update monthly payments, rents, and period snapshots", async () => {
-    const adminDb = testEnv.authenticatedContext(ADMIN_UID, {
-      email: "huynhnhatthinh.2003@gmail.com",
-    }).firestore();
+    const adminDb = authenticatedDb(ADMIN_UID);
 
     await assertSucceeds(
-      adminDb.doc("groups/P102/payments/pay-1").set(paymentPayload(ADMIN_UID)),
+      adminDb.doc(`groups/${GROUP_ID}/payments/pay-1`).set(paymentPayload(ADMIN_UID)),
     );
     await assertSucceeds(
-      adminDb.doc("groups/P102/payments/pay-1").set(
+      adminDb.doc(`groups/${GROUP_ID}/payments/pay-1`).set(
         {
           amount: 120000,
         },
@@ -171,10 +283,12 @@ describe("firestore rules", () => {
     );
 
     await assertSucceeds(
-      adminDb.doc("groups/P102/rents/2026-03").set(rentPayload("2026-03", ADMIN_UID)),
+      adminDb.doc(`groups/${GROUP_ID}/rents/2026-03`).set(
+        rentPayload("2026-03", ADMIN_UID),
+      ),
     );
     await assertSucceeds(
-      adminDb.doc("groups/P102/rents/2026-03").set(
+      adminDb.doc(`groups/${GROUP_ID}/rents/2026-03`).set(
         {
           note: "Cap nhat",
         },
@@ -183,10 +297,12 @@ describe("firestore rules", () => {
     );
 
     await assertSucceeds(
-      adminDb.doc("groups/P102/periods/2026-03").set(periodPayload("2026-03", ADMIN_UID)),
+      adminDb.doc(`groups/${GROUP_ID}/periods/2026-03`).set(
+        periodPayload("2026-03", ADMIN_UID),
+      ),
     );
     await assertSucceeds(
-      adminDb.doc("groups/P102/periods/2026-03").set(
+      adminDb.doc(`groups/${GROUP_ID}/periods/2026-03`).set(
         {
           stats: {
             ...periodPayload("2026-03", ADMIN_UID).stats,
@@ -198,17 +314,12 @@ describe("firestore rules", () => {
     );
   });
 
-  it("blocks operators from changing member roles or group config", async () => {
-    const adminDb = testEnv.authenticatedContext(ADMIN_UID, {
-      email: "huynhnhatthinh.2003@gmail.com",
-    }).firestore();
+  it("blocks admins from changing member roles or group config", async () => {
+    const adminDb = authenticatedDb(ADMIN_UID);
 
     await assertFails(
-      adminDb.doc(`groups/P102/members/${MEMBER_UID}`).set(
+      adminDb.doc(`groups/${GROUP_ID}/members/${MEMBER_UID}`).set(
         {
-          uid: MEMBER_UID,
-          email: "huynhthanhthao14062001@gmail.com",
-          memberId: "thao",
           role: "admin",
         },
         { merge: true },
@@ -216,7 +327,7 @@ describe("firestore rules", () => {
     );
 
     await assertFails(
-      adminDb.doc("groups/P102").set(
+      adminDb.doc(`groups/${GROUP_ID}`).set(
         {
           updatedAt: "now",
         },
@@ -225,17 +336,16 @@ describe("firestore rules", () => {
     );
   });
 
-  it("allows members to read members and update only their own soft profile fields", async () => {
-    const memberDb = testEnv.authenticatedContext(MEMBER_UID, {
-      email: "huynhthanhthao14062001@gmail.com",
-    }).firestore();
+  it("allows members to read group members and update only their own soft profile fields", async () => {
+    const memberDb = authenticatedDb(MEMBER_UID);
 
-    await assertSucceeds(memberDb.doc(`groups/P102/members/${OWNER_UID}`).get());
+    await assertSucceeds(memberDb.doc(`groups/${GROUP_ID}`).get());
+    await assertSucceeds(memberDb.doc(`groups/${GROUP_ID}/members/${OWNER_UID}`).get());
 
     await assertSucceeds(
-      memberDb.doc(`groups/P102/members/${MEMBER_UID}`).set(
+      memberDb.doc(`groups/${GROUP_ID}/members/${MEMBER_UID}`).set(
         {
-          displayName: "Thao moi",
+          displayName: "Member moi",
           photoURL: "https://example.com/avatar.png",
           updatedAt: "now",
         },
@@ -244,13 +354,11 @@ describe("firestore rules", () => {
     );
   });
 
-  it("blocks members from changing their own role or memberId", async () => {
-    const memberDb = testEnv.authenticatedContext(MEMBER_UID, {
-      email: "huynhthanhthao14062001@gmail.com",
-    }).firestore();
+  it("blocks members from changing their own role, memberId, or email", async () => {
+    const memberDb = authenticatedDb(MEMBER_UID);
 
     await assertFails(
-      memberDb.doc(`groups/P102/members/${MEMBER_UID}`).set(
+      memberDb.doc(`groups/${GROUP_ID}/members/${MEMBER_UID}`).set(
         {
           role: "admin",
         },
@@ -259,9 +367,18 @@ describe("firestore rules", () => {
     );
 
     await assertFails(
-      memberDb.doc(`groups/P102/members/${MEMBER_UID}`).set(
+      memberDb.doc(`groups/${GROUP_ID}/members/${MEMBER_UID}`).set(
         {
-          memberId: "hung",
+          memberId: "owner",
+        },
+        { merge: true },
+      ),
+    );
+
+    await assertFails(
+      memberDb.doc(`groups/${GROUP_ID}/members/${MEMBER_UID}`).set(
+        {
+          email: "changed@example.test",
         },
         { merge: true },
       ),
@@ -269,63 +386,68 @@ describe("firestore rules", () => {
   });
 
   it("blocks members from writing payments, rents, and periods", async () => {
-    const memberDb = testEnv.authenticatedContext(MEMBER_UID, {
-      email: "huynhthanhthao14062001@gmail.com",
-    }).firestore();
+    const memberDb = authenticatedDb(MEMBER_UID);
 
     await assertFails(
-      memberDb.doc("groups/P102/payments/pay-1").set(paymentPayload(MEMBER_UID)),
+      memberDb.doc(`groups/${GROUP_ID}/payments/pay-1`).set(paymentPayload(MEMBER_UID)),
     );
     await assertFails(
-      memberDb.doc("groups/P102/rents/2026-03").set(rentPayload("2026-03", MEMBER_UID)),
+      memberDb.doc(`groups/${GROUP_ID}/rents/2026-03`).set(
+        rentPayload("2026-03", MEMBER_UID),
+      ),
     );
     await assertFails(
-      memberDb.doc("groups/P102/periods/2026-03").set(periodPayload("2026-03", MEMBER_UID)),
+      memberDb.doc(`groups/${GROUP_ID}/periods/2026-03`).set(
+        periodPayload("2026-03", MEMBER_UID),
+      ),
     );
   });
 
-  it("allows members to create expenses", async () => {
-    const memberDb = testEnv.authenticatedContext(MEMBER_UID, {
-      email: "huynhthanhthao14062001@gmail.com",
-    }).firestore();
+  it("allows members to create expenses but not update or delete them", async () => {
+    const memberDb = authenticatedDb(MEMBER_UID);
+    const expenseRef = memberDb.doc(`groups/${GROUP_ID}/expenses/exp-1`);
 
     await assertSucceeds(
-      memberDb.doc("groups/P102/expenses/exp-1").set({
+      expenseRef.set({
         date: "2026-03-15",
         amount: 120000,
-        payerId: "thao",
-        participants: ["thao", "hung"],
-        debts: { hung: 60000 },
+        payerId: "member",
+        participants: ["member", "owner"],
+        debts: { owner: 60000 },
         note: "An trua",
         createdBy: MEMBER_UID,
       }),
     );
-  });
 
-  it("blocks outsiders from reading rent docs", async () => {
-    await testEnv.withSecurityRulesDisabled(async (context) => {
-      await context.firestore()
-        .doc("groups/P102/rents/2026-03")
-        .set(rentPayload("2026-03", OWNER_UID));
-    });
-
-    const outsiderDb = testEnv.authenticatedContext("outsider-uid", {
-      email: "outsider@example.com",
-    }).firestore();
-
-    await assertFails(outsiderDb.doc("groups/P102/rents/2026-03").get());
+    await assertFails(expenseRef.set({ note: "Sua ghi chu" }, { merge: true }));
+    await assertFails(expenseRef.delete());
   });
 
   it("blocks unexpected fields in rent payload", async () => {
-    const ownerDb = testEnv.authenticatedContext(OWNER_UID, {
-      email: "hungtran00.nt@gmail.com",
-    }).firestore();
+    const ownerDb = authenticatedDb(OWNER_UID);
 
     await assertFails(
-      ownerDb.doc("groups/P102/rents/2026-03").set({
+      ownerDb.doc(`groups/${GROUP_ID}/rents/2026-03`).set({
         ...rentPayload("2026-03", OWNER_UID),
         evil: true,
       }),
     );
+  });
+
+  it("keeps the seeded membership roles unchanged after denied writes", async () => {
+    const adminDb = authenticatedDb(ADMIN_UID);
+    await assertFails(
+      adminDb.doc(`groups/${GROUP_ID}/members/${ADMIN_UID}`).set(
+        { role: "owner" },
+        { merge: true },
+      ),
+    );
+
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      const snapshot = await context.firestore()
+        .doc(`groups/${GROUP_ID}/members/${ADMIN_UID}`)
+        .get();
+      expect(snapshot.data().role).toBe("admin");
+    });
   });
 });
