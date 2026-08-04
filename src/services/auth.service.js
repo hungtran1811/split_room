@@ -1,59 +1,82 @@
 import {
   GoogleAuthProvider,
-  createUserWithEmailAndPassword,
-  signInWithEmailAndPassword,
-  signInWithPopup,
-  signOut,
-  onAuthStateChanged,
-  signInWithRedirect,
   getRedirectResult,
-  getAuth,
+  onAuthStateChanged,
+  signInWithPopup,
+  signInWithRedirect,
+  signOut,
 } from "firebase/auth";
 import { auth } from "../config/firebase";
+import { disposeLiveDataHub } from "./live-data-hub.js";
 
 const provider = new GoogleAuthProvider();
-function isMobile() {
-  return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-}
+provider.setCustomParameters({ prompt: "select_account" });
 
 export function watchAuth(callback) {
   return onAuthStateChanged(auth, callback);
 }
 
-export async function loginWithEmail(email, password) {
-  const cred = await signInWithEmailAndPassword(auth, email, password);
-  return cred.user;
-}
-
-export async function registerWithEmail(email, password) {
-  const cred = await createUserWithEmailAndPassword(auth, email, password);
-  return cred.user;
-}
-
 export async function loginWithGoogle() {
-  const auth = getAuth();
-  const provider = new GoogleAuthProvider();
-
-  if (isMobile()) {
-    // ✅ Mobile → redirect
-    await signInWithRedirect(auth, provider);
-    return;
-  } else {
-    // ✅ Desktop → popup
+  try {
     await signInWithPopup(auth, provider);
+    return { mode: "popup" };
+  } catch (error) {
+    if (!shouldFallbackToRedirect(error)) {
+      throw error;
+    }
+
+    await signInWithRedirect(auth, provider);
+    return { mode: "redirect" };
   }
 }
 
-export async function handleRedirectResult() {
+export async function resolvePendingGoogleRedirect() {
   try {
     const result = await getRedirectResult(auth);
     return result?.user || null;
-  } catch (e) {
-    console.error("Redirect login failed:", e);
-    throw e;
+  } catch (error) {
+    console.error("Redirect login failed:", error);
+    throw error;
   }
 }
 
+export function getAuthErrorMessage(error) {
+  const code = error?.code || "";
+
+  if (code.includes("auth/unauthorized-domain")) {
+    return "Domain hiện tại chưa được thêm vào Authorized domains của Firebase.";
+  }
+
+  if (code.includes("auth/operation-not-allowed")) {
+    return "Google Sign-In chưa được bật trong Firebase Authentication.";
+  }
+
+  if (code.includes("auth/popup-blocked")) {
+    return "Trình duyệt đã chặn cửa sổ đăng nhập Google.";
+  }
+
+  if (code.includes("auth/popup-closed-by-user")) {
+    return "Bạn đã đóng cửa sổ đăng nhập trước khi hoàn tất.";
+  }
+
+  if (code.includes("auth/network-request-failed")) {
+    return "Không thể kết nối tới Firebase. Hãy kiểm tra mạng rồi thử lại.";
+  }
+
+  return error?.message || "Đăng nhập Google thất bại.";
+}
+
+function shouldFallbackToRedirect(error) {
+  const code = error?.code || "";
+
+  return (
+    code.includes("auth/popup-blocked") ||
+    code.includes("auth/operation-not-supported-in-this-environment") ||
+    code.includes("auth/web-storage-unsupported")
+  );
+}
+
 export async function logout() {
+  disposeLiveDataHub();
   await signOut(auth);
 }

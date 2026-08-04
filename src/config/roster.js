@@ -1,4 +1,3 @@
-// src/config/roster.js
 export const ROSTER = [
   { id: "hung", name: "Hưng" },
   { id: "thao", name: "Thảo" },
@@ -6,8 +5,8 @@ export const ROSTER = [
   { id: "thuy", name: "Thùy" },
 ];
 
-export const ROSTER_IDS = ROSTER.map((m) => m.id);
+export const ROSTER_IDS = ROSTER.map((member) => member.id);
 
 export function nameOf(id) {
-  return ROSTER.find((m) => m.id === id)?.name || id;
+  return ROSTER.find((member) => member.id === id)?.name || id;
 }

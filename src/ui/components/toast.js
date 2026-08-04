@@ -1,4 +1,6 @@
 // src/ui/components/toast.js
+import { Toast } from "bootstrap";
+
 export function ensureToastHost() {
   if (document.getElementById("toastHost")) return;
 
@@ -34,8 +36,7 @@ export function showToast({
   `;
 
   document.getElementById("toastHost").appendChild(el);
-  // bootstrap Toast global
-  const toast = new window.bootstrap.Toast(el, { delay: 2200 });
+  const toast = Toast.getOrCreateInstance(el, { delay: 2200 });
   toast.show();
 
   el.addEventListener("hidden.bs.toast", () => el.remove());

@@ -1,36 +1,63 @@
 import { db } from "../config/firebase";
 import {
-  doc,
-  setDoc,
-  getDoc,
   collection,
+  doc,
+  getDoc,
   getDocs,
-  query,
   orderBy,
+  query,
   serverTimestamp,
+  setDoc,
 } from "firebase/firestore";
 
-export async function savePeriodSnapshot(groupId, period, payload) {
-  // doc id: YYYY-MM (vd: 2026-01)
-  const ref = doc(db, "groups", groupId, "periods", period);
+function periodDocRef(groupId, period) {
+  return doc(db, "groups", groupId, "periods", period);
+}
 
+export function buildMonthlyReportSnapshotPayload(period, payload, existingDoc = null) {
+  return {
+    period,
+    snapshotType: "monthly-report",
+    reportVersion: 1,
+    snapshotAt: serverTimestamp(),
+    snapshotBy: payload.snapshotBy,
+    stats: payload.stats,
+    snapshot: payload.snapshot,
+    updatedAt: serverTimestamp(),
+    createdAt: existingDoc?.createdAt || serverTimestamp(),
+  };
+}
+
+export async function savePeriodSnapshot(groupId, period, payload) {
+  const ref = periodDocRef(groupId, period);
   const data = {
     period,
-    lockedSoft: true, // chốt mềm
+    lockedSoft: true,
     lockedAt: serverTimestamp(),
     lockedBy: payload.lockedBy,
     stats: payload.stats,
     snapshot: payload.snapshot,
-    updatedAt: serverTimestamp(), // lần cập nhật snapshot gần nhất
+    updatedAt: serverTimestamp(),
   };
 
-  // merge true: chốt lại tháng đó sẽ overwrite snapshot + updatedAt
   await setDoc(ref, data, { merge: true });
 }
 
+export async function saveMonthlyReportSnapshot(groupId, period, payload) {
+  const ref = periodDocRef(groupId, period);
+  const existing = await getDoc(ref);
+  const currentData = existing.exists() ? existing.data() : null;
+  const nextPayload = buildMonthlyReportSnapshotPayload(
+    period,
+    payload,
+    currentData,
+  );
+
+  await setDoc(ref, nextPayload, { merge: true });
+}
+
 export async function getPeriod(groupId, period) {
-  const ref = doc(db, "groups", groupId, "periods", period);
-  const snap = await getDoc(ref);
+  const snap = await getDoc(periodDocRef(groupId, period));
   return snap.exists() ? { id: snap.id, ...snap.data() } : null;
 }
 

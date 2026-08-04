@@ -23,35 +23,21 @@ export async function addExpense(groupId, payload) {
   return res.id;
 }
 
-export async function listExpenses(groupId) {
-  const colRef = collection(db, "groups", groupId, "expenses");
-  // date dạng YYYY-MM-DD thì orderBy string OK
-  const q = query(
-    colRef,
-    orderBy("date", "desc"),
-    orderBy("createdAt", "desc"),
-  );
-  const snap = await getDocs(q);
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-}
-
 export async function removeExpense(groupId, expenseId) {
   const ref = doc(db, "groups", groupId, "expenses", expenseId);
   await deleteDoc(ref);
 }
 
-export function watchExpenses(groupId, onChange) {
+export async function fetchExpensesBefore(groupId, beforeDate) {
   const colRef = collection(db, "groups", groupId, "expenses");
   const q = query(
     colRef,
+    where("date", "<", beforeDate),
     orderBy("date", "desc"),
     orderBy("createdAt", "desc"),
   );
-
-  return onSnapshot(q, (snap) => {
-    const items = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-    onChange(items);
-  });
+  const snap = await getDocs(q);
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 }
 
 export function watchExpensesByRange(groupId, startDate, endDate, onChange) {

@@ -1,70 +1,185 @@
-// src/services/rent.service.js
 import { db } from "../config/firebase";
 import {
-  doc,
-  setDoc,
-  updateDoc,
-  serverTimestamp,
-  onSnapshot,
-  getDoc,
   collection,
-  query,
-  where,
-  orderBy,
-  limit,
-  getDocs,
+  doc,
   documentId,
+  getDoc,
+  getDocs,
+  limit,
+  onSnapshot,
+  orderBy,
+  query,
+  serverTimestamp,
+  setDoc,
+  where,
 } from "firebase/firestore";
-/**
- * Doc id = period (VD: "2026-02") để upsert dễ
- * Path: groups/{groupId}/rents/{period}
- */
-export async function upsertRentByPeriod(groupId, period, payload) {
-  const ref = doc(db, "groups", groupId, "rents", period);
-  await setDoc(
-    ref,
-    {
-      ...payload,
-      period,
-      updatedAt: serverTimestamp(),
-      createdAt: payload?.createdAt || serverTimestamp(),
-    },
-    { merge: true },
+import { wrapFirestoreError } from "../core/errors";
+import { sanitizeRentPayload } from "../domain/rent/compute";
+
+const PERIOD_FALLBACK_SCAN_LIMIT = 12;
+
+function rentDocRef(groupId, period) {
+  return doc(db, "groups", groupId, "rents", period);
+}
+
+function periodDocRef(groupId, period) {
+  return doc(db, "groups", groupId, "periods", period);
+}
+
+function isPermissionDenied(error) {
+  const code = error?.code || "";
+  return code.includes("permission-denied");
+}
+
+function normalizeRentDoc(period, data) {
+  if (!data) return null;
+
+  return {
+    id: period,
+    period: data.period || period,
+    ...data,
+  };
+}
+
+function normalizePeriodRentDoc(period, data) {
+  const rent = data?.rent;
+  if (!rent || typeof rent !== "object") return null;
+
+  return {
+    id: period,
+    period: rent.period || data?.period || period,
+    ...rent,
+  };
+}
+
+async function readRentDoc(groupId, period) {
+  try {
+    const snap = await getDoc(rentDocRef(groupId, period));
+    return snap.exists() ? normalizeRentDoc(period, snap.data()) : null;
+  } catch (error) {
+    if (isPermissionDenied(error)) return null;
+    throw error;
+  }
+}
+
+async function readRentFromPeriodDoc(groupId, period) {
+  try {
+    const snap = await getDoc(periodDocRef(groupId, period));
+    return snap.exists() ? normalizePeriodRentDoc(period, snap.data()) : null;
+  } catch (error) {
+    if (isPermissionDenied(error)) return null;
+    throw error;
+  }
+}
+
+function buildRentPayload(period, payload, existingRent = null) {
+  return {
+    ...sanitizeRentPayload(period, payload, existingRent),
+    updatedAt: serverTimestamp(),
+    createdAt:
+      existingRent?.createdAt || payload?.createdAt || serverTimestamp(),
+  };
+}
+
+function wrapRentError(error, period, path) {
+  console.error(`[rent] write failed for ${path}`, error);
+  return wrapFirestoreError(
+    error,
+    `Không thể lưu tiền nhà tháng ${period}. Hãy kiểm tra dữ liệu và Firestore rules.`,
   );
-  return period;
 }
 
-export async function updateRentByPeriod(groupId, period, patch) {
-  const ref = doc(db, "groups", groupId, "rents", period);
-  await updateDoc(ref, { ...patch, updatedAt: serverTimestamp() });
+export async function upsertRentByPeriod(groupId, period, payload) {
+  const existingRent = await getRentByPeriod(groupId, period);
+  const nextPayload = buildRentPayload(period, payload, existingRent);
+
+  try {
+    await setDoc(rentDocRef(groupId, period), nextPayload, { merge: true });
+    return period;
+  } catch (error) {
+    throw wrapRentError(error, period, `groups/${groupId}/rents/${period}`);
+  }
 }
 
-export function watchRentByPeriod(groupId, period, cb) {
-  const ref = doc(db, "groups", groupId, "rents", period);
-  return onSnapshot(ref, (snap) => {
-    cb(snap.exists() ? { id: snap.id, ...snap.data() } : null);
-  });
+export function watchRentByPeriod(groupId, period, callback) {
+  let emitted = false;
+
+  return onSnapshot(
+    rentDocRef(groupId, period),
+    async (snap) => {
+      if (snap.exists()) {
+        emitted = true;
+        callback(normalizeRentDoc(period, snap.data()));
+        return;
+      }
+
+      if (!emitted) {
+        const fallback = await readRentFromPeriodDoc(groupId, period);
+        emitted = true;
+        callback(fallback);
+        return;
+      }
+
+      callback(null);
+    },
+    (error) => {
+      if (isPermissionDenied(error)) {
+        callback(null);
+        return;
+      }
+
+      console.error(`[rent] watch failed for rents/${period}`, error);
+    },
+  );
 }
 
 export async function getRentByPeriod(groupId, period) {
-  const ref = doc(db, "groups", groupId, "rents", period);
-  const snap = await getDoc(ref);
-  return snap.exists() ? { id: snap.id, ...snap.data() } : null;
+  const direct = await readRentDoc(groupId, period);
+  if (direct) return direct;
+
+  return readRentFromPeriodDoc(groupId, period);
 }
 
 export async function getLatestRentBefore(groupId, period) {
-  const colRef = collection(db, "groups", groupId, "rents");
+  try {
+    const rentsRef = collection(db, "groups", groupId, "rents");
+    const rentQuery = query(
+      rentsRef,
+      where(documentId(), "<", period),
+      orderBy(documentId(), "desc"),
+      limit(1),
+    );
 
-  const q = query(
-    colRef,
-    where(documentId(), "<", period),
-    orderBy(documentId(), "desc"),
-    limit(1),
-  );
+    const rentSnap = await getDocs(rentQuery);
+    if (!rentSnap.empty) {
+      const first = rentSnap.docs[0];
+      return normalizeRentDoc(first.id, first.data());
+    }
+  } catch (error) {
+    if (!isPermissionDenied(error)) {
+      throw error;
+    }
+  }
 
-  const snap = await getDocs(q);
-  if (snap.empty) return null;
+  try {
+    const periodsRef = collection(db, "groups", groupId, "periods");
+    const periodQuery = query(
+      periodsRef,
+      where(documentId(), "<", period),
+      orderBy(documentId(), "desc"),
+      limit(PERIOD_FALLBACK_SCAN_LIMIT),
+    );
 
-  const d = snap.docs[0];
-  return { id: d.id, ...d.data() };
+    const periodSnap = await getDocs(periodQuery);
+    for (const snap of periodSnap.docs) {
+      const normalized = normalizePeriodRentDoc(snap.id, snap.data());
+      if (normalized) return normalized;
+    }
+  } catch (error) {
+    if (!isPermissionDenied(error)) {
+      throw error;
+    }
+  }
+
+  return null;
 }

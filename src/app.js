@@ -1,55 +1,108 @@
-import { watchAuth, logout } from "./services/auth.service";
-import { setUser, setGroup, setMembers, state } from "./core/state";
+import {
+  getAuthErrorMessage,
+  logout,
+  resolvePendingGoogleRedirect,
+  watchAuth,
+} from "./services/auth.service";
+import {
+  initSelectedPeriod,
+  setGroup,
+  setMemberProfile,
+  setMembers,
+  setUser,
+  state,
+} from "./core/state";
+import { normalizeMemberRole } from "./core/roles";
 import { renderLoginPage } from "./ui/pages/login.page";
-import { renderDashboardPage } from "./ui/pages/dashboard.page";
-import { renderExpensesPage } from "./ui/pages/expenses.page";
+import { getRoutePath } from "./core/routing";
+import { destroyAppShell } from "./ui/layout/shell-controller";
+import { resetPageMountCache } from "./ui/layout/page-mount";
+import { renderAuthScreen } from "./ui/components/authScreen";
+import { unmountPrimaryNav } from "./ui/layout/navbar";
+import { ensureDefaultGroup } from "./services/group.service";
+import {
+  getCurrentMemberProfile,
+  upsertMemberProfile,
+  watchGroupMembers,
+  watchMyMemberProfile,
+} from "./services/member.service";
+import { resolveMemberIdFromEmail } from "./config/members.map";
+import { LEGACY_OWNER_UID } from "./config/constants";
 
-import { ensureDefaultGroup, getMembers } from "./services/group.service";
+const pageLoaders = {
+  "#/dashboard": () =>
+    import("./ui/pages/dashboard/index.js").then((module) => module.renderDashboardPage),
+  "#/expenses": () =>
+    import("./ui/pages/expenses/index.js").then((module) => module.renderExpensesPage),
+  "#/payments": () =>
+    import("./ui/pages/payments/index.js").then((module) => module.renderPaymentsPage),
+  "#/rent": () =>
+    import("./ui/pages/rent/index.js").then((module) => module.renderRentPage),
+  "#/reports": () =>
+    import("./ui/pages/reports/index.js").then((module) => module.renderReportsPage),
+  "#/admin": () =>
+    import("./ui/pages/admin.page.js").then((module) => module.renderAdminPage),
+};
 
-// Nếu bạn vẫn dùng mapping email -> memberId
-import { upsertMemberProfile } from "./services/member.service";
-import { EMAIL_TO_MEMBER_ID } from "./config/members.map";
-import { isAdmin } from "./core/roles";
-import { renderRentPage } from "./ui/pages/rent.page";
-
-// ===============================
-// APP BOOT STATE
-// ===============================
-let authReady = false; // Firebase đã trả auth state lần đầu chưa?
-let bootLoading = true; // Đang load group/members?
-let bootError = null; // Lỗi boot (nếu có)
-
-function getRoute() {
-  return window.location.hash || "#/dashboard";
+function resolvePageLoader(route) {
+  if (route.startsWith("#/expenses")) return pageLoaders["#/expenses"];
+  if (route.startsWith("#/payments")) return pageLoaders["#/payments"];
+  if (route.startsWith("#/rent")) return pageLoaders["#/rent"];
+  if (route.startsWith("#/reports")) return pageLoaders["#/reports"];
+  if (route.startsWith("#/admin")) return pageLoaders["#/admin"];
+  return pageLoaders["#/dashboard"];
 }
 
-// ===============================
-// LOADING / ERROR SCREEN (HT STYLE)
-// ===============================
+let authReady = false;
+let bootLoading = true;
+let bootError = null;
+let redirectResolved = false;
+let pendingLoginMessage = "";
+let unsubMyMemberProfile = null;
+let unsubGroupMembers = null;
+
+function getRoute() {
+  return getRoutePath(window.location.hash || "#/dashboard");
+}
+
+function redirectMatrixRoute() {
+  const hash = window.location.hash || "";
+  if (!hash.startsWith("#/matrix")) return false;
+
+  const queryIndex = hash.indexOf("?");
+  const query = queryIndex === -1 ? "" : hash.slice(queryIndex);
+  const nextHash = query.includes("tab=")
+    ? `#/payments${query}`
+    : "#/payments?tab=matrix";
+  window.location.replace(nextHash);
+  return true;
+}
+
 function renderBootScreen() {
   const root = document.getElementById("app");
   if (!root) return;
+  unmountPrimaryNav();
 
-  // ERROR UI
   if (bootError) {
-    root.innerHTML = `
-      <div class="container py-5">
-        <div class="alert alert-danger">
-          <div class="fw-semibold mb-1">Không thể tải dữ liệu</div>
-          <div class="small mb-3">${bootError}</div>
-          <div class="d-flex gap-2">
-            <button class="btn btn-primary" id="btnRetry">Thử lại</button>
-            <button class="btn btn-outline-secondary" id="btnLogout">Đăng xuất</button>
+    root.innerHTML = renderAuthScreen({
+      variant: "boot",
+      bootTitle: "Không thể tải dữ liệu",
+      bootSubtitle: bootError,
+      content: `
+        <div class="auth-screen__stack">
+          <div class="d-flex gap-2 justify-content-center flex-wrap">
+            <button class="btn btn-primary btn-sm" id="btnRetry">Thử lại</button>
+            <button class="btn btn-outline-secondary btn-sm" id="btnLogout">Đăng xuất</button>
           </div>
         </div>
-      </div>
-    `;
+      `,
+    });
 
     root.querySelector("#btnRetry")?.addEventListener("click", async () => {
       bootError = null;
       bootLoading = true;
       renderBootScreen();
-      // re-run setup if still logged in
+
       if (state.user) {
         await afterLoginSetup(state.user);
         await render();
@@ -63,114 +116,145 @@ function renderBootScreen() {
     return;
   }
 
-  // LOADING UI
-  if (!authReady || bootLoading) {
-    root.innerHTML = `
-      <div class="container py-5">
-        <div class="d-flex align-items-center gap-3">
-          <div class="spinner-border" role="status" aria-label="Loading"></div>
-          <div>
-            <div class="fw-semibold">Đang tải...</div>
-            <div class="text-secondary small">Vui lòng chờ trong giây lát</div>
-          </div>
-        </div>
-      </div>
-    `;
+  if (!redirectResolved || !authReady || bootLoading) {
+    root.innerHTML = renderAuthScreen({
+      variant: "boot",
+      bootTitle: "Đang tải...",
+      bootSubtitle: "Vui lòng chờ trong giây lát",
+    });
   }
 }
 
-// ===============================
-// MEMBER PROFILE (OPTIONAL)
-// ===============================
+function stopGroupSubscriptions() {
+  if (unsubMyMemberProfile) {
+    unsubMyMemberProfile();
+    unsubMyMemberProfile = null;
+  }
+
+  if (unsubGroupMembers) {
+    unsubGroupMembers();
+    unsubGroupMembers = null;
+  }
+}
+
+function startGroupSubscriptions(groupId, uid) {
+  stopGroupSubscriptions();
+
+  unsubMyMemberProfile = watchMyMemberProfile(groupId, uid, (profile) => {
+    setMemberProfile(profile);
+  });
+
+  unsubGroupMembers = watchGroupMembers(groupId, (members) => {
+    setMembers(members);
+  });
+}
+
 async function ensureMemberProfile() {
   const email = state.user?.email || "";
-  const memberId = EMAIL_TO_MEMBER_ID[email];
+  const memberId = resolveMemberIdFromEmail(email);
 
   if (!memberId) {
     throw new Error("Email chưa được gán thành viên trong nhóm.");
   }
 
+  const currentProfile = await getCurrentMemberProfile(
+    state.groupId,
+    state.user.uid,
+  );
+  const role = normalizeMemberRole({
+    ...(currentProfile || {}),
+    uid: state.user.uid,
+    memberId,
+    role:
+      state.user.uid === LEGACY_OWNER_UID
+        ? "owner"
+        : currentProfile?.role,
+  });
+
   await upsertMemberProfile(state.groupId, state.user, {
     memberId,
-    role: isAdmin(state.user) ? "admin" : "member",
+    role,
   });
+
+  const nextProfile = await getCurrentMemberProfile(
+    state.groupId,
+    state.user.uid,
+  );
+  setMemberProfile(
+    nextProfile || {
+      uid: state.user.uid,
+      email,
+      displayName: state.user.displayName || "",
+      photoURL: state.user.photoURL || "",
+      memberId,
+      role,
+    },
+  );
 }
 
-// ===============================
-// AFTER LOGIN BOOT
-// ===============================
 async function afterLoginSetup(user) {
   bootLoading = true;
   bootError = null;
   renderBootScreen();
 
   try {
-    // 1) đảm bảo có group
     const groupId = await ensureDefaultGroup(user);
     setGroup(groupId);
 
-    // 2) (optional) đồng bộ member profile
     await ensureMemberProfile();
-
-    // 3) load members
-    const members = await getMembers(groupId);
-    setMembers(members);
+    startGroupSubscriptions(groupId, user.uid);
 
     bootLoading = false;
-  } catch (e) {
-    console.error("Boot setup failed:", e);
-    bootError = e?.message || "Unknown error";
+  } catch (error) {
+    console.error("Boot setup failed:", error);
+    bootError = error?.message || "Unknown error";
     bootLoading = false;
     renderBootScreen();
   }
 }
 
-// ===============================
-// ROUTER RENDER
-// ===============================
 async function render() {
-  // Auth chưa sẵn sàng -> chỉ show loading
-  if (!authReady) {
+  if (!redirectResolved || !authReady) {
     renderBootScreen();
     return;
   }
 
-  // Chưa login -> login page
   if (!state.user) {
     bootLoading = false;
     bootError = null;
-    renderLoginPage({ onDone: () => render() });
+    destroyAppShell();
+    resetPageMountCache();
+
+    const initialMessage = pendingLoginMessage;
+    pendingLoginMessage = "";
+    renderLoginPage({ initialMessage });
     return;
   }
 
-  // Đang load group/members -> show loading
   if (bootLoading || bootError) {
     renderBootScreen();
     return;
   }
 
-  const route = getRoute();
-
-  if (route.startsWith("#/expenses")) {
-    await renderExpensesPage();
-  } else if (route.startsWith("#/rent")) {
-    await renderRentPage();
-  } else {
-    renderDashboardPage();
+  if (redirectMatrixRoute()) {
+    return;
   }
+
+  const route = getRoute();
+  const renderPage = await resolvePageLoader(route)();
+  await renderPage();
 }
 
-// ===============================
-// APP START
-// ===============================
-export function startApp() {
-  if (!window.location.hash || window.location.hash === "#") {
-    window.location.hash = "#/dashboard";
+async function initAuthFlow() {
+  try {
+    await resolvePendingGoogleRedirect();
+  } catch (error) {
+    pendingLoginMessage = getAuthErrorMessage(error);
+  } finally {
+    redirectResolved = true;
+    renderBootScreen();
   }
-  // 1) Vừa vào app luôn render loading trước (giống ht)
-  renderBootScreen();
 
-  // 2) Auth listener
   watchAuth(async (user) => {
     authReady = true;
     setUser(user);
@@ -178,8 +262,10 @@ export function startApp() {
     if (user) {
       await afterLoginSetup(user);
     } else {
+      stopGroupSubscriptions();
       setGroup(null);
       setMembers([]);
+      setMemberProfile(null);
       bootLoading = false;
       bootError = null;
     }
@@ -187,6 +273,69 @@ export function startApp() {
     await render();
   });
 
-  // 3) Router
   window.addEventListener("hashchange", () => render());
+}
+
+function ensureOfflineBanner() {
+  let banner = document.getElementById("offlineBanner");
+  if (!banner) {
+    banner = document.createElement("div");
+    banner.id = "offlineBanner";
+    banner.className = "offline-banner";
+    banner.hidden = true;
+    banner.textContent = "Đang offline — chỉ xem dữ liệu đã tải";
+    document.body.prepend(banner);
+  }
+
+  const update = () => {
+    banner.hidden = navigator.onLine;
+  };
+
+  window.addEventListener("online", update);
+  window.addEventListener("offline", update);
+  update();
+}
+
+function registerServiceWorker() {
+  if (import.meta.env.DEV || !("serviceWorker" in navigator)) return;
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js").catch(() => {});
+  });
+}
+
+async function clearDevServiceWorkerCache() {
+  if (!import.meta.env.DEV || !("serviceWorker" in navigator)) return;
+
+  const registrations = await navigator.serviceWorker.getRegistrations();
+  await Promise.all(registrations.map((registration) => registration.unregister()));
+
+  if ("caches" in window) {
+    const keys = await caches.keys();
+    await Promise.all(keys.map((key) => caches.delete(key)));
+  }
+}
+
+function ensureClientMonitoring() {
+  window.addEventListener("error", (event) => {
+    console.error("[splitroom] client error", event.error || event.message);
+  });
+
+  window.addEventListener("unhandledrejection", (event) => {
+    console.error("[splitroom] unhandled rejection", event.reason);
+  });
+}
+
+export function startApp() {
+  ensureClientMonitoring();
+  initSelectedPeriod();
+  ensureOfflineBanner();
+  void clearDevServiceWorkerCache();
+  registerServiceWorker();
+
+  if (!window.location.hash || window.location.hash === "#") {
+    window.location.hash = "#/dashboard";
+  }
+
+  renderBootScreen();
+  void initAuthFlow();
 }

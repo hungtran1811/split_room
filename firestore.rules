@@ -1,0 +1,225 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function groupDocPath(groupId) {
+      return /databases/$(database)/documents/groups/$(groupId);
+    }
+
+    function memberDocPath(groupId, uid) {
+      return /databases/$(database)/documents/groups/$(groupId)/members/$(uid);
+    }
+
+    function memberExists(groupId, uid) {
+      return exists(memberDocPath(groupId, uid));
+    }
+
+    function memberDoc(groupId, uid) {
+      return get(memberDocPath(groupId, uid));
+    }
+
+    function isGroupMember(groupId) {
+      return signedIn() && memberExists(groupId, request.auth.uid);
+    }
+
+    function isGroupOwner(groupId) {
+      return isGroupMember(groupId)
+        && memberDoc(groupId, request.auth.uid).data.role == "owner";
+    }
+
+    function isGroupOperator(groupId) {
+      return isGroupMember(groupId)
+        && memberDoc(groupId, request.auth.uid).data.role in ["owner", "admin"];
+    }
+
+    function periodRegex() {
+      return '^\\d{4}-\\d{2}$';
+    }
+
+    function validRole(role) {
+      return role in ["owner", "admin", "member"];
+    }
+
+    function validMemberData(data, uid) {
+      return data.uid == uid
+        && data.memberId is string
+        && data.memberId.size() > 0
+        && data.email is string
+        && data.email.size() > 0
+        && validRole(data.role);
+    }
+
+    function validMemberWrite(uid) {
+      return validMemberData(request.resource.data, uid);
+    }
+
+    function memberIdentityUnchanged() {
+      return request.resource.data.uid == resource.data.uid
+        && request.resource.data.email == resource.data.email
+        && request.resource.data.memberId == resource.data.memberId;
+    }
+
+    function onlyUpdatesOwnProfile() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+        "displayName",
+        "photoURL",
+        "updatedAt"
+      ]);
+    }
+
+    // A new group must be created atomically with the creator's owner membership.
+    function validBootstrapGroupCreate(groupId) {
+      return signedIn()
+        && !exists(groupDocPath(groupId))
+        && existsAfter(memberDocPath(groupId, request.auth.uid))
+        && validMemberData(
+          getAfter(memberDocPath(groupId, request.auth.uid)).data,
+          request.auth.uid
+        )
+        && getAfter(memberDocPath(groupId, request.auth.uid)).data.role == "owner";
+    }
+
+    function validBootstrapOwnerMemberCreate(groupId, uid) {
+      return signedIn()
+        && request.auth.uid == uid
+        && !exists(groupDocPath(groupId))
+        && existsAfter(groupDocPath(groupId))
+        && validMemberWrite(uid)
+        && request.resource.data.role == "owner";
+    }
+
+    function rentAllowedKeys() {
+      return [
+        "period",
+        "payerId",
+        "items",
+        "total",
+        "headcount",
+        "water",
+        "electric",
+        "computed",
+        "splitMode",
+        "shares",
+        "paid",
+        "note",
+        "status",
+        "finalizedAt",
+        "finalizedBy",
+        "createdBy",
+        "createdAt",
+        "updatedAt"
+      ];
+    }
+
+    function validRentShape(rentId) {
+      return request.resource.data.keys().hasOnly(rentAllowedKeys())
+        && request.resource.data.period is string
+        && request.resource.data.period.matches(periodRegex())
+        && request.resource.data.period == rentId
+        && request.resource.data.payerId is string
+        && request.resource.data.payerId.size() > 0
+        && request.resource.data.items is map
+        && request.resource.data.total is number
+        && request.resource.data.total >= 0
+        && request.resource.data.headcount is number
+        && request.resource.data.headcount >= 0
+        && request.resource.data.water is map
+        && request.resource.data.electric is map
+        && request.resource.data.computed is map
+        && request.resource.data.splitMode in ["equal", "custom"]
+        && request.resource.data.shares is map
+        && request.resource.data.paid is map
+        && request.resource.data.createdBy is string
+        && request.resource.data.createdBy.size() > 0
+        && (!request.resource.data.keys().hasAny(["status"])
+          || request.resource.data.status in ["draft", "finalized"])
+        && (!request.resource.data.keys().hasAny(["finalizedAt"])
+          || request.resource.data.finalizedAt == null
+          || request.resource.data.finalizedAt is string
+          || request.resource.data.finalizedAt is timestamp)
+        && (!request.resource.data.keys().hasAny(["finalizedBy"])
+          || request.resource.data.finalizedBy == null
+          || request.resource.data.finalizedBy is string);
+    }
+
+    function validPeriodWrite(groupId, periodId) {
+      return isGroupOperator(groupId)
+        && request.resource.data.period is string
+        && request.resource.data.period.matches(periodRegex())
+        && request.resource.data.period == periodId;
+    }
+
+    match /groups/{groupId} {
+      allow read: if isGroupMember(groupId);
+      allow create: if validBootstrapGroupCreate(groupId);
+      allow update, delete: if isGroupOwner(groupId);
+
+      match /members/{uid} {
+        allow read: if isGroupMember(groupId);
+
+        allow create: if (
+            isGroupOwner(groupId)
+            && validMemberWrite(uid)
+          )
+          || validBootstrapOwnerMemberCreate(groupId, uid);
+
+        allow update: if (
+            isGroupOwner(groupId)
+            && validMemberWrite(uid)
+            && memberIdentityUnchanged()
+          )
+          || (
+            isGroupMember(groupId)
+            && request.auth.uid == uid
+            && validMemberWrite(uid)
+            && memberIdentityUnchanged()
+            && request.resource.data.role == resource.data.role
+            && onlyUpdatesOwnProfile()
+          );
+
+        allow delete: if isGroupOwner(groupId);
+      }
+
+      match /expenses/{expenseId} {
+        allow read: if isGroupMember(groupId);
+        allow create: if isGroupMember(groupId);
+        allow update, delete: if isGroupOperator(groupId);
+      }
+
+      match /payments/{paymentId} {
+        allow read: if isGroupMember(groupId);
+        allow create, update, delete: if isGroupOperator(groupId);
+      }
+
+      match /rents/{rentId} {
+        allow read: if isGroupMember(groupId);
+
+        allow create: if isGroupOperator(groupId)
+          && validRentShape(rentId)
+          && request.resource.data.createdBy is string;
+
+        allow update: if isGroupOperator(groupId)
+          && validRentShape(rentId)
+          && (
+            request.resource.data.createdBy == resource.data.createdBy
+            || (
+              !resource.data.keys().hasAny(["createdBy"])
+              && request.resource.data.createdBy is string
+            )
+          );
+
+        allow delete: if isGroupOperator(groupId);
+      }
+
+      match /periods/{periodId} {
+        allow read: if isGroupMember(groupId);
+        allow create, update: if validPeriodWrite(groupId, periodId);
+        allow delete: if isGroupOperator(groupId);
+      }
+    }
+  }
+}

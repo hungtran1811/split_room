@@ -22,34 +22,21 @@ export async function addPayment(groupId, payload) {
   return res.id;
 }
 
-export async function listPayments(groupId) {
-  const colRef = collection(db, "groups", groupId, "payments");
-  const q = query(
-    colRef,
-    orderBy("date", "desc"),
-    orderBy("createdAt", "desc"),
-  );
-  const snap = await getDocs(q);
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-}
-
 export async function removePayment(groupId, paymentId) {
   const ref = doc(db, "groups", groupId, "payments", paymentId);
   await deleteDoc(ref);
 }
 
-export function watchPayments(groupId, onChange) {
+export async function fetchPaymentsBefore(groupId, beforeDate) {
   const colRef = collection(db, "groups", groupId, "payments");
   const q = query(
     colRef,
+    where("date", "<", beforeDate),
     orderBy("date", "desc"),
     orderBy("createdAt", "desc"),
   );
-
-  return onSnapshot(q, (snap) => {
-    const items = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-    onChange(items);
-  });
+  const snap = await getDocs(q);
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 }
 
 export function watchPaymentsByRange(groupId, start, end, cb) {

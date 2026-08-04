@@ -4,6 +4,7 @@ export function renderMatrixTable({
   members,
   matrix,
   title = t("rawDebtsMatrix"),
+  formatAmount = formatVND,
 }) {
   const ids = members.map((m) => m.id);
 
@@ -33,7 +34,7 @@ export function renderMatrixTable({
                   : v > 0
                     ? "fw-semibold"
                     : "text-secondary";
-                const text = isDiag ? "-" : formatVND(v);
+                const text = isDiag ? "-" : formatAmount(v);
                 return `<td class="text-center ${cls}">${text}</td>`;
               })
               .join("")}
