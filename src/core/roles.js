@@ -1,16 +1,7 @@
-import { LEGACY_OWNER_UID, OWNER_MEMBER_ID } from "../config/constants";
 import { resolveMemberIdFromEmail } from "../config/members.map";
 
 export function normalizeMemberRole(profile) {
   if (!profile) return "member";
-
-  if (
-    profile.uid === LEGACY_OWNER_UID ||
-    profile.id === LEGACY_OWNER_UID ||
-    profile.memberId === OWNER_MEMBER_ID
-  ) {
-    return "owner";
-  }
 
   if (
     profile.role === "owner" ||

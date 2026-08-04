@@ -1,25 +1,25 @@
-import { nameOf } from "../../config/roster";
-import { parseVndInput } from "../../core/money";
-import { mapFirestoreError } from "../../core/errors";
-import { state } from "../../core/state";
+import { nameOf } from "../../../config/roster";
+import { parseVndInput } from "../../../core/money";
+import { mapFirestoreError } from "../../../core/errors";
+import { state } from "../../../core/state";
 import {
   addPayment,
   removePayment,
   updatePayment,
-} from "../../services/payment.service";
-import { openConfirmModal } from "../components/confirmModal";
-import { openPaymentEditModal } from "../components/paymentEditModal";
-import { openPaymentModal } from "../components/paymentModal";
-import { showToast } from "../components/toast";
-import { bindCopyButtons } from "../utils/copyAmount";
-import { copySettlementReminder } from "../utils/settlement-message";
+} from "../../../services/payment.service";
+import { openConfirmModal } from "../../components/confirmModal";
+import { openPaymentEditModal } from "../../components/paymentEditModal";
+import { openPaymentModal } from "../../components/paymentModal";
+import { showToast } from "../../components/toast";
+import { bindCopyButtons } from "../../utils/copyAmount";
+import { copySettlementReminder } from "../../utils/settlement-message";
 import {
   defaultPaymentDateForPeriod,
   formatPaymentVND,
   parseSettlementAction,
   paymentDateBoundsForPeriod,
   paymentDateHelpForPeriod,
-} from "../views/payments.view";
+} from "./render";
 
 export function bindPaymentsActions({
   root,

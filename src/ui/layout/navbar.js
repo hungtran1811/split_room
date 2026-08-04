@@ -6,11 +6,11 @@ import {
 import { getNavIcon, renderIcon } from "../icons";
 
 const CORE_ITEMS = [
-  { id: "dashboard", label: "Tổng quan", mobileLabel: "Tổng quan", href: "#/dashboard" },
+  { id: "dashboard", label: "Tổng quan", mobileLabel: "Tổng", href: "#/dashboard" },
   { id: "expenses", label: "Chi tiêu", mobileLabel: "Chi", href: "#/expenses" },
-  { id: "payments", label: "Cấn trừ", mobileLabel: "Cấn trừ", href: "#/payments" },
+  { id: "payments", label: "Cấn trừ", mobileLabel: "Trả", href: "#/payments" },
   { id: "rent", label: "Tiền nhà", mobileLabel: "Nhà", href: "#/rent" },
-  { id: "reports", label: "Báo cáo", mobileLabel: "Báo cáo", href: "#/reports" },
+  { id: "reports", label: "Báo cáo", mobileLabel: "BC", href: "#/reports" },
 ];
 
 const ALL_PRIMARY_ITEMS = CORE_ITEMS;

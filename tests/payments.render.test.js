@@ -6,9 +6,9 @@ import {
   parseSettlementAction,
   settlementActionValue,
   isPaymentDateInPeriod,
-} from "../src/ui/views/payments.view.js";
+} from "../src/ui/pages/payments/render.js";
 
-describe("payments.view settlement dates", () => {
+describe("payments.render settlement dates", () => {
   afterEach(() => {
     vi.useRealTimers();
   });

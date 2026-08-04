@@ -1,16 +1,16 @@
-import { getRouteQuery } from "../../core/routing";
-import { state } from "../../core/state";
-import { ROSTER, nameOf } from "../../config/roster";
-import { getCurrentUserLabel, getUserLabel } from "../../core/display-name";
-import { formatVND } from "../../config/i18n";
-import { buildMonthlySettlementView } from "../../domain/matrix/compute";
-import { getMonthRange, lastDayOfPeriod } from "../../core/period";
-import { renderMatrixTable } from "../components/matrixTable";
-import { renderIconButton, renderListRow } from "../components/listRow";
-import { renderMetricGrid } from "../components/metricTile";
-import { renderSectionHeader } from "../components/sectionHeader";
-import { renderSkeletonStatGrid } from "../components/skeletonCard";
-import { renderSkeletonList } from "../components/skeletonList";
+import { getRouteQuery } from "../../../core/routing";
+import { state } from "../../../core/state";
+import { ROSTER, nameOf } from "../../../config/roster";
+import { getCurrentUserLabel, getUserLabel } from "../../../core/display-name";
+import { formatVND } from "../../../config/i18n";
+import { buildMonthlySettlementView } from "../../../domain/matrix/compute";
+import { getMonthRange, lastDayOfPeriod } from "../../../core/period";
+import { renderMatrixTable } from "../../components/matrixTable";
+import { renderIconButton, renderListRow } from "../../components/listRow";
+import { renderMetricGrid } from "../../components/metricTile";
+import { renderSectionHeader } from "../../components/sectionHeader";
+import { renderSkeletonStatGrid } from "../../components/skeletonCard";
+import { renderSkeletonList } from "../../components/skeletonList";
 
 const PERIOD_KEY_REGEX = /^\d{4}-\d{2}$/;
 export const PAYMENT_TABS = [
@@ -296,15 +296,27 @@ function renderSummaryCards(summary) {
   );
 }
 
-function renderSettlementList(items, canOperateMonth, debtPeriod = "") {
+function renderSettlementList(
+  items,
+  canOperateMonth,
+  debtPeriod = "",
+  myMemberId = null,
+) {
   if (!items.length) {
     return `<div class="empty-state empty-state--compact"><div class="empty-state__title">Đã cân bằng</div></div>`;
   }
 
+  const ordered = [...items].sort((a, b) => {
+    const aMine = myMemberId && a.fromId === myMemberId ? 0 : 1;
+    const bMine = myMemberId && b.fromId === myMemberId ? 0 : 1;
+    return aMine - bMine;
+  });
+
   return `
     <div class="stack-list">
-      ${items
+      ${ordered
         .map((item) => {
+          const youOwe = !!(myMemberId && item.fromId === myMemberId);
           const actions = canOperateMonth
             ? `
               <button class="btn btn-primary btn-sm" data-pay-full="${settlementActionValue(item, debtPeriod)}">Đủ</button>
@@ -320,9 +332,12 @@ function renderSettlementList(items, canOperateMonth, debtPeriod = "") {
 
           return renderListRow({
             title: `${nameOf(item.fromId)} → ${nameOf(item.toId)}`,
+            subtitle: youOwe ? "Bạn phải trả" : "",
             amount: formatPaymentVND(item.amount),
             actions,
-            className: "list-row--settlement",
+            className: youOwe
+              ? "list-row--settlement list-row--you-owe"
+              : "list-row--settlement",
           });
         })
         .join("")}
@@ -538,6 +553,8 @@ function renderSuggestTab({
   monthSettlement,
   canOperate,
   period,
+  myMemberId = null,
+  frozenPlan = false,
 }) {
   return `
     <div class="payments-page__panel">
@@ -545,13 +562,25 @@ function renderSuggestTab({
       <section class="payments-section">
         <div class="payments-section__head">
           <h3 class="payments-section__title">Gợi ý cấn trừ tháng này</h3>
-          ${
-            monthSettlement.settlementPlan.length
-              ? `<button type="button" class="btn btn-outline-secondary btn-sm" id="btnCopyAllSettlement">Copy nhắc Zalo</button>`
-              : ""
-          }
+          <div class="d-flex flex-wrap gap-2 align-items-center">
+            ${
+              frozenPlan
+                ? `<span class="filter-pill filter-pill--neutral">Đã chốt</span>`
+                : ""
+            }
+            ${
+              monthSettlement.settlementPlan.length
+                ? `<button type="button" class="btn btn-outline-secondary btn-sm" id="btnCopyAllSettlement">Copy nhắc Zalo</button>`
+                : ""
+            }
+          </div>
         </div>
-        ${renderSettlementList(monthSettlement.settlementPlan, canOperate, period)}
+        ${renderSettlementList(
+          monthSettlement.settlementPlan,
+          canOperate,
+          period,
+          myMemberId,
+        )}
       </section>
       ${
         previousDebtByMonth.length
@@ -601,6 +630,8 @@ export function renderTabPanels({
   monthPayments,
   monthSettlement,
   canOperate,
+  myMemberId = null,
+  frozenPlan = false,
 }) {
   if (activeTab === "history") {
     return renderHistoryTab(monthPayments, canOperate);
@@ -621,6 +652,8 @@ export function renderTabPanels({
     monthSettlement,
     canOperate,
     period,
+    myMemberId,
+    frozenPlan,
   });
 }
 

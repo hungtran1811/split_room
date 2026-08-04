@@ -96,7 +96,59 @@ Fields may include:
 - `lockedSoft`
 - `lockedAt`
 - `lockedBy`
+- `closedAt`
+- `closedBy`
+- `closeSource` (`manual` | `schedule`)
+- `snapshotType` (`monthly-report` | `month-close`)
 - `stats`
 - `snapshot`
 - `rent`
 - `updatedAt`
+
+Month-close snapshots set `lockedSoft: true` and `snapshotType: "month-close"`.
+The `snapshot` map typically holds `balances`, `settlementPlan`, `rent`, and `members`.
+
+## Notification
+
+Path: `groups/{groupId}/notifications/{notificationId}`
+
+In-app inbox per authenticated member.
+
+Fields:
+
+- `uid` (recipient Firebase Auth uid)
+- `memberId` (roster id)
+- `type` (e.g. `month-closed`)
+- `period` (`YYYY-MM`)
+- `title`
+- `body`
+- `settlement` (optional array of settlement rows relevant to the member)
+- `createdAt`
+- `readAt` (null until the recipient marks read)
+
+Security: members can read only their own docs; they may update only `readAt`.
+Operators may create; owners may delete.
+
+## Mail Outbox
+
+Path: `groups/{groupId}/mailOutbox/{mailId}`
+
+Email queue for Cloud Functions (`processMailOutbox`). Clients never send SMTP directly.
+
+Fields:
+
+- `to`
+- `uid`
+- `memberId`
+- `period`
+- `groupId`
+- `type` (e.g. `month-closed`)
+- `subject`
+- `text`
+- `html`
+- `status` (`pending` on create; Functions update to `sent` / `failed`)
+- `createdAt`
+- `sentAt` / `failedAt` / `error` / `provider` / `providerId` (set by Admin SDK)
+
+Security: operators may create with `status: "pending"`; client updates/deletes are denied.
+Functions use the Admin SDK to update delivery status (bypasses rules).

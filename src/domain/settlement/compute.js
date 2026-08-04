@@ -1,4 +1,4 @@
-import { settleDebts } from "../../engine/settle";
+import { settleDebts } from "./settle";
 
 export function computeSettlementPlan(balances) {
   return settleDebts(balances).map((item) => ({

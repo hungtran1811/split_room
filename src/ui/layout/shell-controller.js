@@ -12,6 +12,7 @@ function renderPersistentShellMarkup() {
           <a class="shell__brand" href="#/dashboard" aria-label="Split Room">SR</a>
           <div id="appPeriodHost" class="shell__period"></div>
           <div class="shell__actions">
+            <div id="notificationBellHost" class="shell__notify"></div>
             <button
               type="button"
               class="shell__quick"

@@ -1,23 +1,24 @@
-import { logout } from "../../services/auth.service";
-import { buildHash } from "../../core/routing";
-import { getSelectedPeriod, state } from "../../core/state";
-import { ROSTER } from "../../config/roster";
-import { getCurrentUserLabel } from "../../core/display-name";
-import { buildMonthlySettlementView } from "../../domain/matrix/compute";
+import { logout } from "../../../services/auth.service";
+import { buildHash } from "../../../core/routing";
+import { getSelectedPeriod, state } from "../../../core/state";
+import { ROSTER } from "../../../config/roster";
+import { getCurrentUserLabel } from "../../../core/display-name";
+import { buildMonthlySettlementView } from "../../../domain/matrix/compute";
 import {
   fetchHistoricalBefore,
   subscribeLiveMonthData,
-} from "../../services/live-data-hub";
-import { getMonthRange } from "../../services/month-ops.service";
+} from "../../../services/live-data-hub";
+import { getPeriod } from "../../../services/period.service";
+import { EMAIL_TO_MEMBER_ID } from "../../../config/members.map";
 import {
   bindSegmentedTabs,
   renderSegmentedTabs,
-} from "../components/segmentedTabs";
-import { bindPaymentsActions } from "../controllers/payments.controller";
-import { mountPage } from "../layout/page-lifecycle";
-import { mountAuthenticatedPage, patchMainContent } from "../layout/page-mount";
-import { getAppRoot } from "../layout/shell-controller";
-import { createRenderScheduler } from "../utils/render-scheduler";
+} from "../../components/segmentedTabs";
+import { mountPage } from "../../layout/page-lifecycle";
+import { mountAuthenticatedPage, patchMainContent } from "../../layout/page-mount";
+import { getAppRoot } from "../../layout/shell-controller";
+import { createRenderScheduler } from "../../utils/render-scheduler";
+import { bindPaymentsActions } from "./actions";
 import {
   PAYMENT_TABS,
   buildPreviousDebtByMonth,
@@ -26,7 +27,7 @@ import {
   renderLoading,
   renderTabPanels,
   resolveActiveTab,
-} from "../views/payments.view";
+} from "./render";
 export async function renderPaymentsPage(options = {}) {
   if (!state.user || !state.groupId) return;
 
@@ -34,6 +35,10 @@ export async function renderPaymentsPage(options = {}) {
   const canOperate = state.canOperateMonth;
   const groupId = state.groupId;
   const currentUserLabel = getCurrentUserLabel(state);
+  const myMemberId =
+    state.memberProfile?.memberId ||
+    EMAIL_TO_MEMBER_ID[state.user?.email || ""] ||
+    null;
   let period = getSelectedPeriod();
   let activeTab = resolveActiveTab(options);
 
@@ -47,11 +52,30 @@ export async function renderPaymentsPage(options = {}) {
   let historicalLoading = false;
   let historicalStarted = false;
   let shellMounted = false;
+  let frozenSettlementPlan = null;
+  let periodMetaToken = 0;
 
   let unsubscribeHub = null;
   let disposed = false;
 
   const { schedule, dispose: disposeScheduler } = createRenderScheduler(render);
+
+  async function loadPeriodMeta(nextPeriod = period) {
+    const token = ++periodMetaToken;
+    try {
+      const periodDoc = await getPeriod(groupId, nextPeriod);
+      if (disposed || token !== periodMetaToken) return;
+      frozenSettlementPlan =
+        periodDoc?.lockedSoft && Array.isArray(periodDoc?.snapshot?.settlementPlan)
+          ? periodDoc.snapshot.settlementPlan
+          : null;
+      schedule();
+    } catch (error) {
+      console.warn("Failed to load period snapshot for payments", error);
+      if (disposed || token !== periodMetaToken) return;
+      frozenSettlementPlan = null;
+    }
+  }
 
   async function loadHistoricalData() {
     if (historicalStarted || historicalLoading || disposed) return;
@@ -83,11 +107,14 @@ export async function renderPaymentsPage(options = {}) {
     const previousExpenses = filterBeforeMonth(allExpenses, period);
     const previousPayments = filterBeforeMonth(allPayments, period);
 
-    const monthSettlement = buildMonthlySettlementView({
+    const liveMonthSettlement = buildMonthlySettlementView({
       roster: ROSTER,
       expenses: monthExpenses,
       payments: monthPayments,
     });
+    const monthSettlement = frozenSettlementPlan
+      ? { ...liveMonthSettlement, settlementPlan: frozenSettlementPlan }
+      : liveMonthSettlement;
     const previousSettlement = buildMonthlySettlementView({
       roster: ROSTER,
       expenses: previousExpenses,
@@ -148,6 +175,8 @@ export async function renderPaymentsPage(options = {}) {
         historicalStarted = false;
         historicalReady = false;
         shellMounted = false;
+        frozenSettlementPlan = null;
+        void loadPeriodMeta(nextPeriod);
         startMonthWatchers();
         if (activeTab === "suggest") void loadHistoricalData();
         schedule();
@@ -202,6 +231,8 @@ export async function renderPaymentsPage(options = {}) {
       monthPayments,
       monthSettlement,
       canOperate,
+      myMemberId,
+      frozenPlan: !!frozenSettlementPlan,
     });
 
     if (!shellMounted) {
@@ -275,6 +306,7 @@ export async function renderPaymentsPage(options = {}) {
   });
 
   if (activeTab === "suggest") void loadHistoricalData();
+  void loadPeriodMeta(period);
   startMonthWatchers();
   schedule();
 }

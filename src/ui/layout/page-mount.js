@@ -2,16 +2,17 @@ import { mountPrimaryNav } from "./navbar";
 import {
   bindPeriodControls,
   updatePeriodUi,
-} from "../controllers/period.controller";
+} from "./period-controls";
 import { openQuickExpenseSheet } from "../components/quickExpenseSheet";
 import { openQuickActionSheet } from "../components/bottomSheet";
+import { mountNotificationBell } from "../components/notificationBell";
 import {
   ensureAppShell,
   patchMainContent,
   setMainContent,
   updateAppShell,
 } from "./shell-controller";
-import { getSelectedPeriod } from "../../core/state";
+import { getSelectedPeriod, state } from "../../core/state";
 
 export { patchMainContent };
 
@@ -19,6 +20,22 @@ let lastShellSignature = "";
 let lastNavSignature = "";
 let periodControlsBound = false;
 let quickActionsBound = false;
+let notificationUnmount = null;
+let notificationKey = "";
+
+function ensureNotificationBell() {
+  const host = document.getElementById("notificationBellHost");
+  const groupId = state.groupId;
+  const uid = state.user?.uid;
+  if (!host || !groupId || !uid) return;
+
+  const nextKey = `${groupId}:${uid}`;
+  if (notificationUnmount && notificationKey === nextKey) return;
+
+  notificationUnmount?.();
+  notificationUnmount = mountNotificationBell(host, { groupId, uid });
+  notificationKey = nextKey;
+}
 
 function bindGlobalQuickActions() {
   if (quickActionsBound) return;
@@ -78,6 +95,9 @@ export function resetPageMountCache() {
   lastNavSignature = "";
   periodControlsBound = false;
   quickActionsBound = false;
+  notificationUnmount?.();
+  notificationUnmount = null;
+  notificationKey = "";
 }
 
 export function mountAuthenticatedPage({
@@ -96,6 +116,7 @@ export function mountAuthenticatedPage({
 } = {}) {
   ensureAppShell();
   bindGlobalQuickActions();
+  ensureNotificationBell();
 
   const activePeriod = period || getSelectedPeriod();
 

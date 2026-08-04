@@ -27,19 +27,19 @@ import {
   watchMyMemberProfile,
 } from "./services/member.service";
 import { resolveMemberIdFromEmail } from "./config/members.map";
-import { LEGACY_OWNER_UID } from "./config/constants";
+import { firebaseConfigured } from "./config/firebase";
 
 const pageLoaders = {
   "#/dashboard": () =>
-    import("./ui/pages/dashboard.page.js").then((module) => module.renderDashboardPage),
+    import("./ui/pages/dashboard/index.js").then((module) => module.renderDashboardPage),
   "#/expenses": () =>
-    import("./ui/pages/expenses.page.js").then((module) => module.renderExpensesPage),
+    import("./ui/pages/expenses/index.js").then((module) => module.renderExpensesPage),
   "#/payments": () =>
-    import("./ui/pages/payments.page.js").then((module) => module.renderPaymentsPage),
+    import("./ui/pages/payments/index.js").then((module) => module.renderPaymentsPage),
   "#/rent": () =>
-    import("./ui/pages/rent.page.js").then((module) => module.renderRentPage),
+    import("./ui/pages/rent/index.js").then((module) => module.renderRentPage),
   "#/reports": () =>
-    import("./ui/pages/reports.page.js").then((module) => module.renderReportsPage),
+    import("./ui/pages/reports/index.js").then((module) => module.renderReportsPage),
   "#/admin": () =>
     import("./ui/pages/admin.page.js").then((module) => module.renderAdminPage),
 };
@@ -78,10 +78,27 @@ function redirectMatrixRoute() {
   return true;
 }
 
+function renderConfigMissingScreen() {
+  const root = document.getElementById("app");
+  if (!root) return;
+  unmountPrimaryNav();
+  root.innerHTML = renderAuthScreen({
+    variant: "boot",
+    bootTitle: "Chưa cấu hình Firebase",
+    bootSubtitle:
+      "Thiếu VITE_FB_API_KEY hoặc VITE_FB_PROJECT_ID. Sao chép .env.example thành .env.local, điền cấu hình Firebase, rồi chạy lại ứng dụng.",
+  });
+}
+
 function renderBootScreen() {
   const root = document.getElementById("app");
   if (!root) return;
   unmountPrimaryNav();
+
+  if (!firebaseConfigured) {
+    renderConfigMissingScreen();
+    return;
+  }
 
   if (bootError) {
     root.innerHTML = renderAuthScreen({
@@ -161,20 +178,14 @@ async function ensureMemberProfile() {
     state.groupId,
     state.user.uid,
   );
-  const role = normalizeMemberRole({
-    ...(currentProfile || {}),
-    uid: state.user.uid,
-    memberId,
-    role:
-      state.user.uid === LEGACY_OWNER_UID
-        ? "owner"
-        : currentProfile?.role,
-  });
 
-  await upsertMemberProfile(state.groupId, state.user, {
-    memberId,
-    role,
-  });
+  if (!currentProfile) {
+    throw new Error(
+      "Tài khoản chưa được thêm vào nhóm. Liên hệ admin chính để được cấp quyền.",
+    );
+  }
+
+  await upsertMemberProfile(state.groupId, state.user);
 
   const nextProfile = await getCurrentMemberProfile(
     state.groupId,
@@ -182,12 +193,13 @@ async function ensureMemberProfile() {
   );
   setMemberProfile(
     nextProfile || {
+      ...currentProfile,
       uid: state.user.uid,
       email,
-      displayName: state.user.displayName || "",
-      photoURL: state.user.photoURL || "",
-      memberId,
-      role,
+      displayName: state.user.displayName || currentProfile.displayName || "",
+      photoURL: state.user.photoURL || currentProfile.photoURL || "",
+      memberId: currentProfile.memberId || memberId,
+      role: normalizeMemberRole(currentProfile),
     },
   );
 }
@@ -334,6 +346,11 @@ export function startApp() {
 
   if (!window.location.hash || window.location.hash === "#") {
     window.location.hash = "#/dashboard";
+  }
+
+  if (!firebaseConfigured) {
+    renderConfigMissingScreen();
+    return;
   }
 
   renderBootScreen();

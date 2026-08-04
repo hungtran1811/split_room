@@ -1,19 +1,20 @@
-import { logout } from "../../services/auth.service";
-import { getSelectedPeriod, state } from "../../core/state";
-import { getCurrentUserLabel } from "../../core/display-name";
-import { mapFirestoreError } from "../../core/errors";
-import { openConfirmModal } from "../components/confirmModal";
-import { showToast } from "../components/toast";
-import { mountAuthenticatedPage, patchMainContent } from "../layout/page-mount";
-import { getMonthlyReportLive } from "../../services/report.service";
-import { downloadMonthlyReportCsv } from "../../services/report-export.service";
-import { getPeriod, savePeriodSnapshot } from "../../services/period.service";
-import { createRenderScheduler } from "../utils/render-scheduler";
+import { logout } from "../../../services/auth.service";
+import { getSelectedPeriod, state } from "../../../core/state";
+import { getCurrentUserLabel } from "../../../core/display-name";
+import { mapFirestoreError } from "../../../core/errors";
+import { openConfirmModal } from "../../components/confirmModal";
+import { showToast } from "../../components/toast";
+import { mountAuthenticatedPage, patchMainContent } from "../../layout/page-mount";
+import { getMonthlyReportLive } from "../../../services/report.service";
+import { downloadMonthlyReportCsv } from "../../../services/report-export.service";
+import { getPeriod } from "../../../services/period.service";
+import { closeMonthManual } from "../../../services/month-close.service";
+import { createRenderScheduler } from "../../utils/render-scheduler";
 import {
   renderExportBar,
   renderLockBar,
   renderReportsBody,
-} from "../views/reports.view";
+} from "./render";
 
 function byId(id) {
   return document.getElementById(id);
@@ -28,6 +29,8 @@ export async function renderReportsPage() {
   let errorMessage = "";
   let liveReport = null;
   let periodLocked = false;
+  let closeSource = "manual";
+  let closedAt = null;
   let loadToken = 0;
   let disposed = false;
   let shellMounted = false;
@@ -45,17 +48,13 @@ export async function renderReportsPage() {
           title: "Chốt tháng",
           message: "Khóa mềm tháng này và lưu snapshot báo cáo?",
           onConfirm: async () => {
-            await savePeriodSnapshot(groupId, period, {
-              lockedBy: state.user.uid,
-              stats: liveReport.stats,
-              snapshot: {
-                balances: liveReport.balances,
-                settlementPlan: liveReport.settlementPlan,
-                rent: liveReport.rentSummary,
-                members: liveReport.memberSummaries,
-              },
+            await closeMonthManual(groupId, period, {
+              uid: state.user.uid,
+              liveReport,
             });
             periodLocked = true;
+            closeSource = "manual";
+            closedAt = new Date();
             showToast({
               title: "Đã chốt",
               message: "Tháng đã được khóa mềm.",
@@ -82,12 +81,23 @@ export async function renderReportsPage() {
     }
   }
 
+  function renderLockRowHtml() {
+    return `
+      ${renderLockBar({
+        locked: periodLocked,
+        canLock: state.isOwner,
+        closeSource,
+        closedAt,
+      })}
+      ${renderExportBar({ canExport: !loading && !errorMessage && !!liveReport })}
+    `;
+  }
+
   function renderReportsContent() {
     return `
       <div class="reports-page">
         <div class="reports-lock-row">
-          ${renderLockBar({ locked: periodLocked, canLock: state.isOwner })}
-          ${renderExportBar({ canExport: !loading && !errorMessage && !!liveReport })}
+          ${renderLockRowHtml()}
         </div>
         <div id="reports-body" class="reports-page__body">
           ${renderReportsBody({ loading, errorMessage, liveReport })}
@@ -124,10 +134,7 @@ export async function renderReportsPage() {
       patchMainContent("#reports-body", renderReportsBody({ loading, errorMessage, liveReport }));
       const lockRow = document.querySelector(".reports-lock-row");
       if (lockRow) {
-        lockRow.innerHTML = `
-          ${renderLockBar({ locked: periodLocked, canLock: state.isOwner })}
-          ${renderExportBar({ canExport: !loading && !errorMessage && !!liveReport })}
-        `;
+        lockRow.innerHTML = renderLockRowHtml();
       }
     }
 
@@ -150,6 +157,8 @@ export async function renderReportsPage() {
 
       liveReport = live;
       periodLocked = !!periodDoc?.lockedSoft;
+      closeSource = periodDoc?.closeSource || "manual";
+      closedAt = periodDoc?.closedAt || periodDoc?.lockedAt || null;
       loading = false;
       schedule();
     } catch (error) {

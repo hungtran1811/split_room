@@ -8,38 +8,26 @@ import {
   serverTimestamp,
   collection,
 } from "firebase/firestore";
-import { normalizeMemberRole } from "../core/roles";
 
 /**
- * Lưu mapping: uid/email -> memberId (hung/thao/thuy/thinh)
- * role: "admin" | "member"
+ * Refresh own profile display fields. Identity/role stay on the existing doc.
  */
-export async function upsertMemberProfile(
-  groupId,
-  user,
-  { memberId, role = "member" },
-) {
+export async function upsertMemberProfile(groupId, user) {
   const ref = doc(db, "groups", groupId, "members", user.uid);
   const current = await getDoc(ref);
-  const normalizedRole = normalizeMemberRole({
-    uid: user.uid,
-    memberId,
-    role,
-  });
+
+  if (!current.exists()) {
+    throw new Error(
+      "Tài khoản chưa được thêm vào nhóm. Liên hệ admin chính để được cấp quyền.",
+    );
+  }
 
   await setDoc(
     ref,
     {
-      uid: user.uid,
-      email: user.email || "",
-      displayName: user.displayName || "",
-      photoURL: user.photoURL || "",
-      memberId, // ✅ quan trọng
-      role: normalizedRole, // ✅ owner/admin/member
+      displayName: user.displayName || current.data()?.displayName || "",
+      photoURL: user.photoURL || current.data()?.photoURL || "",
       updatedAt: serverTimestamp(),
-      createdAt: current.exists()
-        ? current.data()?.createdAt || serverTimestamp()
-        : serverTimestamp(),
     },
     { merge: true },
   );

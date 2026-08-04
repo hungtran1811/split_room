@@ -28,18 +28,29 @@ export function buildMonthlyReportSnapshotPayload(period, payload, existingDoc =
   };
 }
 
-export async function savePeriodSnapshot(groupId, period, payload) {
-  const ref = periodDocRef(groupId, period);
-  const data = {
+export function buildMonthClosePayload(period, payload, existingDoc = null) {
+  return {
     period,
     lockedSoft: true,
     lockedAt: serverTimestamp(),
-    lockedBy: payload.lockedBy,
-    stats: payload.stats,
-    snapshot: payload.snapshot,
+    lockedBy: payload.lockedBy || payload.closedBy || null,
+    closedAt: serverTimestamp(),
+    closedBy: payload.closedBy || payload.lockedBy || null,
+    closeSource: payload.closeSource || "manual",
+    snapshotType: "month-close",
+    reportVersion: 1,
+    stats: payload.stats || {},
+    snapshot: payload.snapshot || {},
     updatedAt: serverTimestamp(),
+    createdAt: existingDoc?.createdAt || serverTimestamp(),
   };
+}
 
+export async function savePeriodSnapshot(groupId, period, payload) {
+  const ref = periodDocRef(groupId, period);
+  const existing = await getDoc(ref);
+  const currentData = existing.exists() ? existing.data() : null;
+  const data = buildMonthClosePayload(period, payload, currentData);
   await setDoc(ref, data, { merge: true });
 }
 

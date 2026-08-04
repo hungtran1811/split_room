@@ -57,7 +57,7 @@ export function bindPeriodControls({ onChange } = {}) {
   const todayButton = document.getElementById("globalPeriodToday");
 
   const emitChange = (nextPeriod) => {
-    const normalized = setSelectedPeriod(nextPeriod);
+    const normalized = setSelectedPeriod(nextPeriod, { persist: true });
     updatePeriodUi(normalized);
     if (typeof onChange === "function") {
       onChange(normalized);

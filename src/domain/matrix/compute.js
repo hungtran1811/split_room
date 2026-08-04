@@ -1,6 +1,6 @@
-import { buildGrossMatrix } from "../../engine/grossMatrix";
-import { computeNetBalances } from "../../engine/netBalance";
-import { settleDebts } from "../../engine/settle";
+import { buildGrossMatrix } from "../settlement/grossMatrix";
+import { computeNetBalances } from "../settlement/netBalance";
+import { settleDebts } from "../settlement/settle";
 import {
   normalizeWholeBalances,
   normalizeWholeMatrix,

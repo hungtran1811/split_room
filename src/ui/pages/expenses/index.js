@@ -1,42 +1,42 @@
-import { logout } from "../../services/auth.service";
+import { logout } from "../../../services/auth.service";
 import {
   getSelectedPeriod,
   state,
-} from "../../core/state";
-import { ROSTER, ROSTER_IDS, nameOf } from "../../config/roster";
-import { getCurrentUserLabel, getUserLabel } from "../../core/display-name";
-import { formatVND } from "../../config/i18n";
-import { parseVndInput } from "../../core/money";
-import { mapFirestoreError } from "../../core/errors";
-import { showToast } from "../components/toast";
-import { openConfirmModal } from "../components/confirmModal";
-import { openExpenseEditModal } from "../components/expenseEditModal";
-import { resolveMemberIdFromEmail } from "../../config/members.map";
-import { canAddExpense } from "../../core/roles";
-import { getRouteQuery } from "../../core/routing";
-import { mountAuthenticatedPage } from "../layout/page-mount";
-import { getAppRoot } from "../layout/shell-controller";
+} from "../../../core/state";
+import { ROSTER, ROSTER_IDS, nameOf } from "../../../config/roster";
+import { getCurrentUserLabel, getUserLabel } from "../../../core/display-name";
+import { formatVND } from "../../../config/i18n";
+import { parseVndInput } from "../../../core/money";
+import { mapFirestoreError } from "../../../core/errors";
+import { showToast } from "../../components/toast";
+import { openConfirmModal } from "../../components/confirmModal";
+import { openExpenseEditModal } from "../../components/expenseEditModal";
+import { resolveMemberIdFromEmail } from "../../../config/members.map";
+import { canAddExpense } from "../../../core/roles";
+import { getRouteQuery } from "../../../core/routing";
+import { mountAuthenticatedPage } from "../../layout/page-mount";
+import { getAppRoot } from "../../layout/shell-controller";
+import { getMonthRange } from "../../../services/month-ops.service";
+import { subscribeLiveMonthData } from "../../../services/live-data-hub";
+import { watchMyMemberProfile } from "../../../services/member.service";
+import { renderIconButton } from "../../components/listRow";
+import { renderMoneyStatCard } from "../../components/metricTile";
 import {
-  addExpense,
-  removeExpense,
-  updateExpense,
-} from "../../services/expense.service";
-import { getMonthRange } from "../../services/month-ops.service";
-import { subscribeLiveMonthData } from "../../services/live-data-hub";
-import { watchMyMemberProfile } from "../../services/member.service";
-import { renderIconButton } from "../components/listRow";
-import { renderMoneyStatCard } from "../components/metricTile";
-import {
+  defaultExpenseDate,
+  defaultListDate,
+  escapeHtml,
   getVisibleExpenses,
   groupExpensesByDate,
+  lastDayOfPeriod,
+  renderExpenseDebtors,
   renderExpenseSummary,
-} from "../views/expenses.view";
-import { openBottomSheet } from "../components/bottomSheet";
-import { renderSectionHeader } from "../components/sectionHeader";
+} from "./render";
+import { openBottomSheet } from "../../components/bottomSheet";
+import { renderSectionHeader } from "../../components/sectionHeader";
 import {
   buildWholeEqualShares,
   toWholeVnd,
-} from "../../domain/money/whole-vnd";
+} from "../../../domain/money/whole-vnd";
 import {
   AMOUNT_PRESETS,
   bindQuickEntryControls,
@@ -45,36 +45,16 @@ import {
   rememberExpenseNote,
   renderAmountPresetButtons,
   renderNoteSuggestionChips,
-} from "../utils/expense-quick-entry";
+} from "../../utils/expense-quick-entry";
+import {
+  bindExpensesFormEvents,
+  createExpense,
+  deleteExpense,
+  editExpense,
+} from "./form";
 
 function byId(id) {
   return document.getElementById(id);
-}
-
-function todayYmd() {
-  const date = new Date();
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-function expenseDateForPeriod(period) {
-  const today = new Date();
-  const [year, month] = String(period || "").split("-").map(Number);
-  if (!year || !month) return todayYmd();
-
-  const currentDay = today.getDate();
-  const lastDay = new Date(year, month, 0).getDate();
-  const day = String(Math.min(currentDay, lastDay)).padStart(2, "0");
-  return `${year}-${String(month).padStart(2, "0")}-${day}`;
-}
-
-function lastDayOfPeriod(period) {
-  const [year, month] = String(period || "").split("-").map(Number);
-  if (!year || !month) return todayYmd();
-  const day = String(new Date(year, month, 0).getDate()).padStart(2, "0");
-  return `${year}-${String(month).padStart(2, "0")}-${day}`;
 }
 
 function creatorLabel(uid) {
@@ -87,46 +67,6 @@ function creatorLabel(uid) {
   if (state.user?.uid === uid) return getCurrentUserLabel(state);
 
   return uid;
-}
-
-function escapeHtml(value) {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
-}
-
-function renderExpenseDebtors(debts) {
-  const entries = Object.entries(debts || {}).filter(
-    ([, amount]) => Number(amount) > 0,
-  );
-
-  if (!entries.length) {
-    return '<span class="expense-item__debtor expense-item__debtor--empty">Không có người nợ</span>';
-  }
-
-  return entries
-    .map(
-      ([memberId, amount]) => `
-        <span class="expense-item__debtor">
-          ${escapeHtml(nameOf(memberId))}
-          <strong>${formatVND(amount)}</strong>
-        </span>
-      `,
-    )
-    .join("");
-}
-
-function defaultExpenseDate(period) {
-  const today = todayYmd();
-  if (today.slice(0, 7) === period) return today;
-  return expenseDateForPeriod(period);
-}
-
-function defaultListDate(period) {
-  const today = todayYmd();
-  return today.slice(0, 7) === period ? today : "";
 }
 
 export async function renderExpensesPage() {
@@ -456,7 +396,7 @@ export async function renderExpensesPage() {
     setMessage("");
 
     try {
-      await addExpense(groupId, {
+      await createExpense(groupId, {
         date,
         amount,
         payerId,
@@ -627,7 +567,7 @@ export async function renderExpensesPage() {
           danger: true,
           onConfirm: async () => {
             try {
-              await removeExpense(groupId, expense.id);
+              await deleteExpense(groupId, expense.id);
               showToast({
                 title: "Thành công",
                 message: "Đã xóa khoản chi.",
@@ -665,7 +605,7 @@ export async function renderExpensesPage() {
           participants: expense.participants || [],
           debts: expense.debts || {},
           onSubmit: async ({ date, note, amount, payerId, participants, debts }) => {
-            await updateExpense(groupId, expense.id, {
+            await editExpense(groupId, expense.id, {
               date,
               note,
               amount,
@@ -876,75 +816,48 @@ export async function renderExpensesPage() {
   function bindEvents() {
     bindComposerQuickEntry();
 
-    byId("btnRepeatLastExpense")?.addEventListener("click", () => {
-      const lastExpense = findLastRepeatableExpense(
-        liveExpenses,
-        getMyMemberId(),
-      );
-      if (!lastExpense) {
-        setMessage("Chưa có khoản chi nào để lặp lại.");
-        return;
-      }
-      setMessage("");
-      applyRepeatableExpense(lastExpense);
-    });
-
-    byId("btnViewAllMonthExpenses")?.addEventListener("click", () => {
-      showAllMonthExpenses = true;
-      selectedExpenseDate = "";
-      if (byId("expenseDateFilter")) byId("expenseDateFilter").value = "";
-      syncExpenseView();
-    });
-
-    byId("btnApplyExpenseDate")?.addEventListener("click", () => {
-      showAllMonthExpenses = false;
-      selectedExpenseDate = byId("expenseDateFilter")?.value || "";
-      syncExpenseView();
-    });
-
-    byId("expenseDateFilter")?.addEventListener("keydown", (event) => {
-      if (event.key === "Enter") {
-        showAllMonthExpenses = false;
-        selectedExpenseDate = event.target.value || "";
+    bindExpensesFormEvents({
+      applyRepeatableExpense: (expense) => {
+        setMessage("");
+        applyRepeatableExpense(expense);
+      },
+      findLastExpense: () =>
+        findLastRepeatableExpense(liveExpenses, getMyMemberId()),
+      onEmptyRepeatableExpense: () =>
+        setMessage("Chưa có khoản chi nào để lặp lại."),
+      onViewAllMonth: () => {
+        showAllMonthExpenses = true;
+        selectedExpenseDate = "";
+        if (byId("expenseDateFilter")) byId("expenseDateFilter").value = "";
         syncExpenseView();
-      }
-    });
-
-    byId("btnResetExpenseDate")?.addEventListener("click", () => {
-      selectedExpenseDate = "";
-      showAllMonthExpenses = false;
-      if (byId("expenseDateFilter")) byId("expenseDateFilter").value = "";
-      syncExpenseView();
-    });
-
-    byId("exPayer").addEventListener("change", renderDebtsInputs);
-    byId("exAmount").addEventListener("input", () => {
-      if (byId("exEqual").checked) {
-        renderDebtsInputs();
-        return;
-      }
-
-      recalcTotals();
-    });
-    byId("exEqual").addEventListener("change", renderDebtsInputs);
-    document.querySelectorAll(".exPart").forEach((checkbox) => {
-      checkbox.addEventListener("change", () => {
+      },
+      onApplyDate: (date) => {
+        showAllMonthExpenses = false;
+        selectedExpenseDate = date ?? (byId("expenseDateFilter")?.value || "");
+        syncExpenseView();
+      },
+      onResetDate: () => {
+        selectedExpenseDate = "";
+        showAllMonthExpenses = false;
+        if (byId("expenseDateFilter")) byId("expenseDateFilter").value = "";
+        syncExpenseView();
+      },
+      onPayerChange: renderDebtsInputs,
+      onAmountChange: () => {
+        if (byId("exEqual").checked) renderDebtsInputs();
+        else recalcTotals();
+      },
+      onEqualSplitChange: renderDebtsInputs,
+      onParticipantChange: () => {
         syncParticipantChips();
         renderDebtsInputs();
-      });
-    });
-    byId("debtsBox").addEventListener("input", (event) => {
-      if (event.target?.classList?.contains("debtInput")) {
-        recalcTotals();
-      }
-    });
-    byId("btnResetExpense").addEventListener("click", resetForm);
-    byId("btnSaveExpense").addEventListener("click", async () => {
-      await saveExpense();
-    });
-
-    byId("expensesHistory")?.addEventListener("toggle", (event) => {
-      expenseListOpen = event.currentTarget.open;
+      },
+      onDebtInput: recalcTotals,
+      onReset: resetForm,
+      onSave: saveExpense,
+      onHistoryToggle: (event) => {
+        expenseListOpen = event.currentTarget.open;
+      },
     });
   }
 

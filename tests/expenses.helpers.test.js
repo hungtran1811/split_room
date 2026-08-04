@@ -3,9 +3,9 @@ import {
   filterExpensesByDate,
   getVisibleExpenses,
   groupExpensesByDate,
-} from "../src/ui/views/expenses.view.js";
+} from "../src/ui/pages/expenses/render.js";
 
-describe("expenses.view", () => {
+describe("expenses.helpers", () => {
   const expenses = [
     { id: "1", date: "2026-06-01", amount: 100 },
     { id: "2", date: "2026-06-13", amount: 200 },

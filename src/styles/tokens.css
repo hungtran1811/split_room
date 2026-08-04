@@ -20,8 +20,10 @@
   --glass-blur: blur(14px);
 
   --header-height: 60px;
-  --nav-height: 72px;
+  --nav-height: 74px;
   --fab-size: 56px;
+  --empty-state-pad: 18px;
+  --skeleton-gap: 12px;
   --touch-min: 44px;
   --radius-sm: 14px;
   --radius-md: 18px;

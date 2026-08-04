@@ -7,12 +7,28 @@ import {
 } from "../src/core/roles.js";
 
 describe("roles", () => {
-  it("normalizes the fixed owner to owner role", () => {
+  it("uses Firestore role only and does not elevate by uid or memberId", () => {
     expect(
       normalizeMemberRole({
         uid: "8tgX0c2IBbTx0k0oIZgn7w2H12b2",
         memberId: "hung",
         role: "admin",
+      }),
+    ).toBe("admin");
+
+    expect(
+      normalizeMemberRole({
+        uid: "any-uid",
+        memberId: "hung",
+        role: "member",
+      }),
+    ).toBe("member");
+
+    expect(
+      normalizeMemberRole({
+        uid: "owner-uid",
+        memberId: "hung",
+        role: "owner",
       }),
     ).toBe("owner");
   });
@@ -38,8 +54,9 @@ describe("roles", () => {
   it("treats owner and admin as month operators", () => {
     expect(
       canOperateMonth({
-        uid: "8tgX0c2IBbTx0k0oIZgn7w2H12b2",
+        uid: "owner-uid",
         memberId: "hung",
+        role: "owner",
       }),
     ).toBe(true);
 
@@ -84,13 +101,21 @@ describe("roles", () => {
     ).toBe(true);
   });
 
-  it("detects owner profiles correctly", () => {
+  it("detects owner profiles from role field only", () => {
+    expect(
+      isOwnerProfile({
+        uid: "owner-uid",
+        memberId: "hung",
+        role: "owner",
+      }),
+    ).toBe(true);
+
     expect(
       isOwnerProfile({
         uid: "8tgX0c2IBbTx0k0oIZgn7w2H12b2",
         memberId: "hung",
       }),
-    ).toBe(true);
+    ).toBe(false);
 
     expect(
       isOwnerProfile({
