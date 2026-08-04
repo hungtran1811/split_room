@@ -1,4 +1,5 @@
 import { logout } from "../../../services/auth.service";
+import { OWNER_MEMBER_ID } from "../../../config/constants";
 import {
   getSelectedPeriod,
   state,
@@ -17,19 +18,23 @@ export async function renderRentPage() {
   if (!state.user || !state.groupId) return;
 
   const groupId = state.groupId;
-  const payerId = "hung";
   const canEdit = state.canOperateMonth;
   const initialPeriod = getSelectedPeriod();
   let period = initialPeriod;
   let liveDoc = null;
   let prefilledPeriod = null;
+  let draftPayerId = OWNER_MEMBER_ID;
+
+  function resolvePayerId() {
+    return liveDoc?.payerId || draftPayerId || OWNER_MEMBER_ID;
+  }
 
   mountAuthenticatedPage({
     pageId: "rent",
     title: "",
     meta: [],
     period: initialPeriod,
-    content: renderRentPageContent(payerId),
+    content: renderRentPageContent(resolvePayerId()),
     nav: {
       active: "rent",
       isOwner: state.isOwner,
@@ -43,7 +48,7 @@ export async function renderRentPage() {
   const form = createRentFormController({
     page,
     groupId,
-    payerId,
+    getPayerId: resolvePayerId,
     canEdit,
     getPeriod: () => period,
     getLiveDoc: () => liveDoc,
@@ -52,7 +57,6 @@ export async function renderRentPage() {
       prefilledPeriod = nextPeriod;
     },
   });
-
   function startWatch() {
     unsubscribeRent?.();
     unsubscribeRent = watchRentByPeriod(groupId, period, (docData) => {
@@ -62,11 +66,15 @@ export async function renderRentPage() {
       if (!docData) {
         if (form.isPrefilled(period)) return;
         form.prefillIfMissing(period).then((applied) => {
-          if (!applied) form.hydrateUI(emptyRentDoc(period, payerId));
+          if (!applied) {
+            draftPayerId = OWNER_MEMBER_ID;
+            form.hydrateUI(emptyRentDoc(period, resolvePayerId()));
+          }
         });
         return;
       }
 
+      draftPayerId = docData.payerId || OWNER_MEMBER_ID;
       form.hydrateUI(docData);
     });
   }

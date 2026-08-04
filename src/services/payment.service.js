@@ -11,6 +11,7 @@ import {
   updateDoc,
 } from "firebase/firestore";
 import { onSnapshot, where } from "firebase/firestore";
+import { clearHistoricalCache } from "./live-data-hub";
 
 export async function addPayment(groupId, payload) {
   const colRef = collection(db, "groups", groupId, "payments");
@@ -19,12 +20,14 @@ export async function addPayment(groupId, payload) {
     createdAt: serverTimestamp(),
   };
   const res = await addDoc(colRef, data);
+  clearHistoricalCache();
   return res.id;
 }
 
 export async function removePayment(groupId, paymentId) {
   const ref = doc(db, "groups", groupId, "payments", paymentId);
   await deleteDoc(ref);
+  clearHistoricalCache();
 }
 
 export async function fetchPaymentsBefore(groupId, beforeDate) {
@@ -65,4 +68,5 @@ export async function updatePayment(groupId, paymentId, patch) {
     ...patch,
     updatedAt: serverTimestamp(),
   });
+  clearHistoricalCache();
 }

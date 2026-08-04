@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "vitest run --exclude tests/firestore.rules.test.js",
+    "test": "vitest run --exclude tests/firestore.rules.test.js --exclude functions/**",
     "test:watch": "vitest",
     "test:rules": "node scripts/run-firestore-emulator.mjs exec",
     "emu": "node scripts/run-firestore-emulator.mjs start",

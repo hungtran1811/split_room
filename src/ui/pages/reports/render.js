@@ -56,9 +56,42 @@ export function renderSummaryCards(report) {
   );
 }
 
-export function renderLockBar({ locked, canLock }) {
+function formatCloseSource(source) {
+  if (source === "schedule") return "lịch tự động";
+  if (source === "manual") return "thủ công";
+  return source || "thủ công";
+}
+
+function formatCloseTime(value) {
+  if (!value) return "";
+  const date =
+    typeof value?.toDate === "function" ? value.toDate() : new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleString("vi-VN", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+export function renderLockBar({
+  locked,
+  canLock,
+  closeSource = "manual",
+  closedAt = null,
+} = {}) {
   if (locked) {
-    return `<div class="filter-pill filter-pill--success">Đã chốt tháng</div>`;
+    const when = formatCloseTime(closedAt || null);
+    return `
+      <div class="reports-lock-status">
+        <span class="status-chip status-chip--success">Đã chốt</span>
+        <span class="reports-lock-status__meta">
+          Nguồn ${formatCloseSource(closeSource)}${when ? ` · ${when}` : ""}
+        </span>
+      </div>
+    `;
   }
   if (!canLock) return "";
   return `<button type="button" class="btn btn-primary btn-sm" id="btnLockPeriod">Chốt tháng</button>`;

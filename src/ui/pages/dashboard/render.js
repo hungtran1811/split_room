@@ -141,14 +141,16 @@ export function renderRentSection(rentSummary) {
 }
 
 export function renderPreviousDebtSection(items, timeline = [], loading = false) {
-  if (loading) return `<details class="dash-panel" id="previousDebtPanel"><summary class="dash-panel__summary">Nợ cũ</summary><div class="dash-panel__body">${renderSkeletonList({ count: 2 })}</div></details>`;
+  if (loading) {
+    return `<details class="dash-panel dash-panel--compact" id="previousDebtPanel"><summary class="dash-panel__summary">Nợ cũ</summary><div class="dash-panel__body dash-panel__body--compact">${renderSkeletonList({ count: 2 })}</div></details>`;
+  }
   if (!items.length) return "";
   return `
-    <details class="dash-panel" id="previousDebtPanel"><summary class="dash-panel__summary"><span>Nợ cũ</span><span class="filter-pill filter-pill--warning">${formatVND(sumAmount(items))}</span></summary>
-      <div class="dash-panel__body">
-        <div class="compact-list">${items.slice(0, 6).map((item) => `<div class="compact-list__row"><span>${nameOf(item.fromId)} → ${nameOf(item.toId)}</span><strong>${formatVND(item.amount)}</strong></div>`).join("")}</div>
-        ${timeline.length ? `<details class="mt-2"><summary class="small text-secondary">Theo tháng (${timeline.length})</summary><div class="compact-list mt-2">${timeline.map((entry) => `<div class="compact-list__row"><span>${formatPeriodLabel(entry.period)}</span><strong>${formatVND(entry.carryTotal)}</strong></div>`).join("")}</div></details>` : ""}
-        ${renderBtn({ label: "Ghi cấn trừ", href: buildHash("/payments", { tab: "suggest" }), variant: "primary", size: "sm", className: "mt-3" })}
+    <details class="dash-panel dash-panel--compact" id="previousDebtPanel"><summary class="dash-panel__summary"><span>Nợ cũ</span><span class="filter-pill filter-pill--warning">${formatVND(sumAmount(items))}</span></summary>
+      <div class="dash-panel__body dash-panel__body--compact">
+        <div class="compact-list">${items.slice(0, 4).map((item) => `<div class="compact-list__row"><span>${nameOf(item.fromId)} → ${nameOf(item.toId)}</span><strong>${formatVND(item.amount)}</strong></div>`).join("")}</div>
+        ${timeline.length ? `<details class="mt-2"><summary class="small text-secondary">Theo tháng (${timeline.length})</summary><div class="compact-list mt-2">${timeline.slice(-3).map((entry) => `<div class="compact-list__row"><span>${formatPeriodLabel(entry.period)}</span><strong>${formatVND(entry.carryTotal)}</strong></div>`).join("")}</div></details>` : ""}
+        ${renderBtn({ label: "Ghi cấn trừ", href: buildHash("/payments", { tab: "suggest" }), variant: "outline-secondary", size: "sm", className: "mt-2" })}
       </div>
     </details>
   `;

@@ -8,7 +8,6 @@ import {
 import { db } from "../config/firebase";
 import { EMAIL_TO_MEMBER_ID } from "../config/members.map";
 import { ROSTER_IDS } from "../config/roster";
-import { LEGACY_OWNER_UID } from "../config/constants";
 import {
   isOwnerProfile,
   normalizeMemberRole,
@@ -39,11 +38,7 @@ function normalizeMemberForAdmin(member) {
     diagnostics.push({ code: "missing-member-id", label: "Thiếu memberId" });
   }
 
-  if (
-    !rawRole ||
-    !["owner", "admin", "member"].includes(rawRole) ||
-    (member.uid === LEGACY_OWNER_UID && rawRole !== "owner")
-  ) {
+  if (!rawRole || !["owner", "admin", "member"].includes(rawRole)) {
     diagnostics.push({ code: "legacy-role", label: "Role legacy" });
   }
 
@@ -105,7 +100,6 @@ function assertOwnerActor(actor, members) {
   const uid = actor?.uid || actor;
   const actorMember = members.find((member) => member.uid === uid);
 
-  if (uid === LEGACY_OWNER_UID) return;
   if (actorMember && isOwnerProfile(actorMember)) return;
 
   throw permissionError("Chỉ admin chính mới được quản trị thành viên.");
@@ -158,7 +152,8 @@ export async function getAdminOverview(groupId, period) {
       currentPeriodStatus: {
         rentExists: !!rent,
         reportSnapshotExists:
-          periodDoc?.snapshotType === "monthly-report" && !!periodDoc?.snapshot,
+          ["monthly-report", "month-close"].includes(periodDoc?.snapshotType) &&
+          !!periodDoc?.snapshot,
       },
     };
   } catch (error) {

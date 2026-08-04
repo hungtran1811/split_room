@@ -76,7 +76,7 @@ function bindStorageListener() {
 }
 
 export function initSelectedPeriod() {
-  state.selectedPeriod = currentPeriod();
+  state.selectedPeriod = readStoredPeriod();
   bindStorageListener();
   persistSelectedPeriod(state.selectedPeriod);
 }

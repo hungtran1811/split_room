@@ -423,6 +423,65 @@ describe("firestore rules", () => {
     await assertFails(expenseRef.delete());
   });
 
+  it("blocks invalid expense creates and locked-period writes", async () => {
+    const memberDb = authenticatedDb(MEMBER_UID);
+    const adminDb = authenticatedDb(ADMIN_UID);
+
+    await assertFails(
+      memberDb.doc(`groups/${GROUP_ID}/expenses/exp-bad`).set({
+        date: "2026-03-15",
+        amount: -1,
+        payerId: "member",
+        debts: { owner: 1 },
+        createdBy: MEMBER_UID,
+      }),
+    );
+
+    await assertFails(
+      memberDb.doc(`groups/${GROUP_ID}/expenses/exp-spoof`).set({
+        date: "2026-03-15",
+        amount: 1000,
+        payerId: "member",
+        debts: { owner: 1000 },
+        createdBy: OWNER_UID,
+      }),
+    );
+
+    await assertSucceeds(
+      adminDb.doc(`groups/${GROUP_ID}/periods/2026-04`).set({
+        period: "2026-04",
+        lockedSoft: true,
+        snapshotType: "month-close",
+      }),
+    );
+
+    await assertFails(
+      memberDb.doc(`groups/${GROUP_ID}/expenses/exp-locked`).set({
+        date: "2026-04-10",
+        amount: 1000,
+        payerId: "member",
+        debts: { owner: 1000 },
+        createdBy: MEMBER_UID,
+      }),
+    );
+
+    await assertFails(
+      adminDb.doc(`groups/${GROUP_ID}/payments/pay-locked`).set({
+        date: "2026-04-10",
+        amount: 1000,
+        fromId: "member",
+        toId: "owner",
+        createdBy: ADMIN_UID,
+      }),
+    );
+
+    await assertFails(
+      adminDb.doc(`groups/${GROUP_ID}/rents/2026-04`).set(
+        rentPayload("2026-04", ADMIN_UID),
+      ),
+    );
+  });
+
   it("blocks unexpected fields in rent payload", async () => {
     const ownerDb = authenticatedDb(OWNER_UID);
 

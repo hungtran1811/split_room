@@ -43,13 +43,16 @@ export function emptyRentDoc(period, payerId) {
 export function createRentFormController({
   page,
   groupId,
-  payerId,
+  getPayerId,
   canEdit,
   getPeriod,
   getLiveDoc,
   getPrefilledPeriod,
   setPrefilledPeriod,
 }) {
+  let currentPayerId = typeof getPayerId === "function" ? getPayerId() : "";
+  const resolvePayerId = () =>
+    getLiveDoc()?.payerId || currentPayerId || getPayerId();
   const byId = (id) => page.querySelector(`#${id}`);
 
   function setEditable(enabled) {
@@ -94,7 +97,7 @@ export function createRentFormController({
     const paid = Object.fromEntries(
       [...page.querySelectorAll(".paidInput")].map((input) => [input.dataset.id, parseVndInt(input.value)]),
     );
-    paid[payerId] = 0;
+    paid[resolvePayerId()] = 0;
     return paid;
   }
 
@@ -116,7 +119,7 @@ export function createRentFormController({
   }
 
   function syncPaidRows(shares, paid) {
-    ROSTER_IDS.filter((memberId) => memberId !== payerId).forEach((memberId) => {
+    ROSTER_IDS.filter((memberId) => memberId !== resolvePayerId()).forEach((memberId) => {
       const row = page.querySelector(`.paidRow[data-id="${memberId}"]`);
       if (!row) return;
       const share = Number(shares?.[memberId] || 0);
@@ -146,6 +149,7 @@ export function createRentFormController({
   function syncSummary(snapshot, { rerenderPaid = false } = {}) {
     const { total, equal, shares, paid, shareError } = snapshot;
     const finalShares = equal ? buildEqualShares(total, ROSTER_IDS) : shares;
+    const payerId = resolvePayerId();
     const collected = sumValues(Object.fromEntries(Object.entries(paid).filter(([memberId]) => memberId !== payerId)));
     const payerBurden = Math.max(total - collected, 0);
     const totalDue = ROSTER_IDS.filter((memberId) => memberId !== payerId).reduce(
@@ -176,7 +180,9 @@ export function createRentFormController({
   }
 
   function hydrateUI(docData) {
-    const normalized = docData || emptyRentDoc(getPeriod(), payerId);
+    const normalized = docData || emptyRentDoc(getPeriod(), resolvePayerId());
+    currentPayerId = normalized.payerId || resolvePayerId();
+    const payerId = currentPayerId;
     const items = normalized.items || { rent: 0, wifi: 0, other: 0 };
     byId("it_rent").value = String(items.rent ?? 0);
     byId("it_wifi").value = String(items.wifi ?? 0);
@@ -232,7 +238,8 @@ export function createRentFormController({
       return;
     }
     const payload = {
-      payerId, items: snapshot.items, total: snapshot.total, headcount: snapshot.meta.headcount,
+      payerId: resolvePayerId(),
+      items: snapshot.items, total: snapshot.total, headcount: snapshot.meta.headcount,
       water: snapshot.meta.water, electric: snapshot.meta.electric,
       computed: { waterCost: snapshot.computed.waterCost, kwhUsed: snapshot.computed.kwhUsed, electricCost: snapshot.computed.electricCost },
       splitMode: snapshot.equal ? "equal" : "custom",

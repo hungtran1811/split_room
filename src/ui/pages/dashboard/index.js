@@ -3,8 +3,10 @@ import { getSelectedPeriod, state } from "../../../core/state";
 import { ROSTER } from "../../../config/roster";
 import { EMAIL_TO_MEMBER_ID } from "../../../config/members.map";
 import { getCurrentUserLabel } from "../../../core/display-name";
+import { buildHash } from "../../../core/routing";
 import { fetchHistoricalBefore, subscribeLiveMonthData } from "../../../services/live-data-hub";
 import { getMonthRange } from "../../../services/month-ops.service";
+import { getPeriod } from "../../../services/period.service";
 import { renderBalanceHero } from "../../components/balanceHero";
 import { buildMemberSummaries, renderMemberSummaries, renderQuickCtaGrid } from "../../components/dashOverview";
 import { openOnboardingModal } from "../../components/onboardingModal";
@@ -48,8 +50,27 @@ export function renderDashboardPage() {
   let disposed = false;
   let allTimeStarted = false;
   let shellMounted = false;
+  let frozenSettlementPlan = null;
+  let periodMetaToken = 0;
 
   const { schedule: scheduleRender, dispose: disposeScheduler } = createRenderScheduler(recomputeAndRender);
+
+  async function loadPeriodMeta(nextPeriod = period) {
+    const token = ++periodMetaToken;
+    try {
+      const periodDoc = await getPeriod(state.groupId, nextPeriod);
+      if (disposed || token !== periodMetaToken) return;
+      frozenSettlementPlan =
+        periodDoc?.lockedSoft && Array.isArray(periodDoc?.snapshot?.settlementPlan)
+          ? periodDoc.snapshot.settlementPlan
+          : null;
+      scheduleRender();
+    } catch (error) {
+      console.warn("Failed to load period snapshot for dashboard", error);
+      if (disposed || token !== periodMetaToken) return;
+      frozenSettlementPlan = null;
+    }
+  }
 
   function renderShell(content) {
     mountAuthenticatedPage({
@@ -95,11 +116,12 @@ export function renderDashboardPage() {
     }
     const expenseTotal = liveExpenses.reduce((sum, item) => sum + Number(item.amount || 0), 0);
     const paymentTotal = livePayments.reduce((sum, item) => sum + Number(item.amount || 0), 0);
-    const settlementPlan = buildMonthlySettlementView({
+    const liveSettlementPlan = buildMonthlySettlementView({
       roster: ROSTER,
       expenses: liveExpenses,
       payments: livePayments,
     }).settlementPlan;
+    const settlementPlan = frozenSettlementPlan || liveSettlementPlan;
     const { start } = getMonthRange(period);
     const previousDebtSettlementPlan = allTimeExpensesReady && allTimePaymentsReady
       ? buildMonthlySettlementView({
@@ -122,13 +144,27 @@ export function renderDashboardPage() {
     };
     const personalDebt = computePersonalDebt(myMemberId, rentSummary, settlementPlan, !!liveRent);
     const memberSummaries = buildMemberSummaries({ roster: ROSTER, rentDoc: liveRent, settlementPlan });
+    const primaryCta =
+      personalDebt.total > 0
+        ? {
+            label: "Cấn trừ ngay",
+            href: buildHash("/payments", { tab: "suggest" }),
+            variant: "primary",
+            size: "sm",
+          }
+        : {
+            label: "Ghi chi tiêu",
+            href: "#/expenses",
+            variant: "primary",
+            size: "sm",
+          };
     const bodyHtml = `
       <div class="dash-page__stack">
         ${renderSparkline({ values: buildDailyTotals(liveExpenses), label: "Chi 7 ngày" })}
         ${renderRentSection(rentSummary)}
         ${allTimeStarted
           ? renderPreviousDebtSection(previousDebtSettlementPlan || [], previousDebtTimeline, allTimeLoading)
-          : `<details class="dash-panel" id="previousDebtPanel"><summary class="dash-panel__summary">Nợ cũ</summary></details>`}
+          : `<details class="dash-panel dash-panel--compact" id="previousDebtPanel"><summary class="dash-panel__summary">Nợ cũ</summary></details>`}
       </div>
     `;
     const content = {
@@ -137,7 +173,7 @@ export function renderDashboardPage() {
         status: personalDebt.status,
         statusLabel: personalDebt.statusLabel,
         breakdown: personalDebt.breakdown,
-        actions: [],
+        actions: [primaryCta],
       }),
       quick: renderQuickCtaGrid({ expense: stats.expenseCount || "", settle: settlementPlan.length || "" }),
       metrics: renderHeroRow(stats),
@@ -205,7 +241,9 @@ export function renderDashboardPage() {
     allTimeStarted = false;
     allTimeExpensesReady = false;
     allTimePaymentsReady = false;
+    frozenSettlementPlan = null;
     renderLoadingShell();
+    void loadPeriodMeta(nextPeriod);
     startWatchers();
   }
 
@@ -225,5 +263,6 @@ export function renderDashboardPage() {
     if (event.target?.id === "previousDebtPanel" && event.target.open) void loadPreviousDebtData();
   });
   renderLoadingShell();
+  void loadPeriodMeta(period);
   startWatchers();
 }

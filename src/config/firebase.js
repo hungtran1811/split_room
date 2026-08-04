@@ -15,9 +15,16 @@ const hasFirebaseConfig = Boolean(
   firebaseConfig.apiKey && firebaseConfig.projectId,
 );
 
+if (!hasFirebaseConfig && typeof console !== "undefined") {
+  console.error(
+    "[splitroom] Thiếu VITE_FB_API_KEY / VITE_FB_PROJECT_ID. Sao chép .env.example thành .env.local và điền cấu hình Firebase.",
+  );
+}
+
 export const fbApp = hasFirebaseConfig ? initializeApp(firebaseConfig) : null;
 export const auth = fbApp ? getAuth(fbApp) : null;
 export const db = fbApp ? getFirestore(fbApp) : null;
+export const firebaseConfigured = hasFirebaseConfig;
 
 if (fbApp && db && typeof window !== "undefined") {
   enableIndexedDbPersistence(db).catch((error) => {

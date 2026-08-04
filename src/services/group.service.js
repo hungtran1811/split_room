@@ -1,12 +1,13 @@
 import { db } from "../config/firebase";
 import { GROUP_ID, ALLOWED_EMAILS } from "../config/constants";
+import { resolveMemberIdFromEmail } from "../config/members.map";
 import {
   collection,
   doc,
   getDoc,
   getDocs,
   serverTimestamp,
-  setDoc,
+  writeBatch,
 } from "firebase/firestore";
 
 export async function ensureDefaultGroup(user) {
@@ -22,10 +23,31 @@ export async function ensureDefaultGroup(user) {
   const groupSnap = await getDoc(groupRef);
 
   if (!groupSnap.exists()) {
-    await setDoc(groupRef, {
+    const memberId = resolveMemberIdFromEmail(email);
+    if (!memberId) {
+      throw new Error("Email chưa được gán thành viên trong nhóm.");
+    }
+
+    const memberRef = doc(db, "groups", groupId, "members", user.uid);
+    const batch = writeBatch(db);
+    const now = serverTimestamp();
+
+    batch.set(groupRef, {
       name: "P102",
-      createdAt: serverTimestamp(),
+      createdAt: now,
     });
+    batch.set(memberRef, {
+      uid: user.uid,
+      email: user.email || "",
+      displayName: user.displayName || "",
+      photoURL: user.photoURL || "",
+      memberId,
+      role: "owner",
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    await batch.commit();
   }
 
   return groupId;

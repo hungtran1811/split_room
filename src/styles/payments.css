@@ -64,3 +64,22 @@
 .payments-page .settlement-explain__month + .settlement-explain__month {
   margin-top: 4px;
 }
+
+.payments-page .list-row--you-owe {
+  border-color: rgba(220, 38, 38, 0.28);
+  background: linear-gradient(180deg, rgba(254, 226, 226, 0.55), #fff);
+  box-shadow: 0 0 0 1px rgba(220, 38, 38, 0.06);
+}
+
+.payments-page .list-row--you-owe .list-row__subtitle {
+  color: var(--danger);
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  font-size: 0.68rem;
+}
+
+.payments-page .list-row--you-owe .list-row__amount {
+  color: var(--danger);
+  font-weight: 800;
+}

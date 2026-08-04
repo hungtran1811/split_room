@@ -192,6 +192,15 @@
   padding: 18px 20px;
 }
 
+.dash-panel--compact .dash-panel__summary {
+  padding: 12px 16px;
+  font-size: var(--text-sm);
+}
+
+.dash-panel__body--compact {
+  padding: 12px 16px 14px;
+}
+
 .dash-panel__head {
   display: flex;
   align-items: center;
