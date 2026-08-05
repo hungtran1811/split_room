@@ -50,7 +50,7 @@ export async function ensureDefaultGroup(user: User): Promise<string> {
       uid: user.uid,
       email: user.email || "",
       displayName: user.displayName || "",
-      photoURL: user.photoURL || "",
+      photoURL: "",
       memberId,
       role: "owner",
       createdAt: now,

@@ -1,13 +1,16 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "../shared/ui/Button";
+import { ConfirmDialog } from "../shared/ui/ConfirmDialog";
 import { EmptyState } from "../shared/ui/EmptyState";
+import { MemberAvatar } from "../shared/ui/MemberAvatar";
+import { OverviewSection } from "../shared/ui/OverviewSection";
 import { PageHeader } from "../shared/ui/PageHeader";
-import { SkeletonList, SkeletonStatGrid } from "../shared/ui/Skeleton";
+import { PageLoadingSkeleton } from "../shared/ui/Skeleton";
 import { useToast } from "../shared/ui/Toast";
 import { useSession } from "../app/SessionContext";
-import { ALLOWED_EMAILS } from "../config/constants";
 import { isOwnerProfile } from "../core/roles";
 import {
+  MAX_BACKUP_ADMINS,
   demoteBackupAdmin,
   getAdminOverview,
   listGroupMembers,
@@ -16,6 +19,57 @@ import {
 
 type AdminMember = Awaited<ReturnType<typeof listGroupMembers>>[number];
 type AdminOverview = Awaited<ReturnType<typeof getAdminOverview>>;
+
+type ConfirmState = {
+  open: boolean;
+  kind: "promote" | "demote";
+  member: AdminMember | null;
+};
+
+const ROLE_MATRIX = [
+  {
+    capability: "Tạo khoản chi",
+    owner: true,
+    admin: true,
+    member: true,
+  },
+  {
+    capability: "Sửa khoản chi",
+    owner: true,
+    admin: true,
+    member: false,
+  },
+  {
+    capability: "Xóa khoản chi",
+    owner: true,
+    admin: false,
+    member: false,
+  },
+  {
+    capability: "Ghi nhận thanh toán",
+    owner: true,
+    admin: true,
+    member: false,
+  },
+  {
+    capability: "Sửa tiền nhà / chốt tháng",
+    owner: true,
+    admin: true,
+    member: false,
+  },
+  {
+    capability: "Xem toàn bộ nợ nhóm",
+    owner: true,
+    admin: true,
+    member: false,
+  },
+  {
+    capability: "Đặt / gỡ admin phụ",
+    owner: true,
+    admin: false,
+    member: false,
+  },
+] as const;
 
 function roleLabel(role: string): string {
   if (role === "owner") return "Admin chính";
@@ -27,6 +81,16 @@ function memberLabel(member: AdminMember): string {
   return String(member.displayName || member.email || member.memberId || member.uid || "Người dùng");
 }
 
+function checkMark(ok: boolean): string {
+  return ok ? "Có" : "—";
+}
+
+const EMPTY_CONFIRM: ConfirmState = {
+  open: false,
+  kind: "promote",
+  member: null,
+};
+
 export function AdminPage() {
   const session = useSession();
   const { showToast } = useToast();
@@ -35,6 +99,7 @@ export function AdminPage() {
   const [errorMessage, setErrorMessage] = useState("");
   const [members, setMembers] = useState<AdminMember[]>([]);
   const [overview, setOverview] = useState<AdminOverview | null>(null);
+  const [confirmState, setConfirmState] = useState<ConfirmState>(EMPTY_CONFIRM);
 
   const owner = isOwnerProfile(session.memberProfile);
 
@@ -60,11 +125,63 @@ export function AdminPage() {
     if (owner) void loadData();
   }, [owner, loadData]);
 
-  async function runAction(action: () => Promise<void>, successMessage: string) {
+  const backupAdmins = useMemo(() => {
+    const fromMembers = members.filter((member) => member.role === "admin");
+    if (fromMembers.length) return fromMembers;
+    return overview?.backupAdmins || [];
+  }, [members, overview]);
+
+  const regularMembers = useMemo(
+    () => members.filter((member) => member.role === "member"),
+    [members],
+  );
+
+  const canPromoteMore = backupAdmins.length < MAX_BACKUP_ADMINS;
+
+  function openPromoteConfirm(member: AdminMember) {
+    if (!canPromoteMore) {
+      showToast({
+        title: "Đã đủ admin phụ",
+        message: `Tối đa ${MAX_BACKUP_ADMINS} người. Hãy gỡ một admin phụ trước.`,
+        variant: "danger",
+      });
+      return;
+    }
+    setConfirmState({ open: true, kind: "promote", member });
+  }
+
+  function openDemoteConfirm(member: AdminMember) {
+    setConfirmState({ open: true, kind: "demote", member });
+  }
+
+  function closeConfirm() {
+    if (actionPending) return;
+    setConfirmState(EMPTY_CONFIRM);
+  }
+
+  async function runConfirmedAction() {
+    if (!session.groupId || !session.user || !confirmState.member?.uid) return;
+    const member = confirmState.member;
+    const kind = confirmState.kind;
+
     setActionPending(true);
     try {
-      await action();
-      showToast({ title: "Thành công", message: successMessage, variant: "success" });
+      if (kind === "promote") {
+        await promoteBackupAdmin(session.groupId, String(member.uid), session.user);
+        showToast({
+          title: "Thành công",
+          message: `Đã đặt ${memberLabel(member)} làm admin phụ.`,
+          variant: "success",
+        });
+      } else {
+        await demoteBackupAdmin(session.groupId, String(member.uid), session.user);
+        showToast({
+          title: "Thành công",
+          message: `Đã gỡ quyền admin phụ của ${memberLabel(member)}.`,
+          variant: "success",
+        });
+      }
+      setConfirmState(EMPTY_CONFIRM);
       await loadData();
     } catch (error) {
       showToast({
@@ -77,26 +194,6 @@ export function AdminPage() {
     }
   }
 
-  async function handlePromote(member: AdminMember) {
-    if (!session.groupId || !session.user || !member.uid) return;
-    const confirmed = window.confirm(`Đặt ${memberLabel(member)} làm admin phụ?`);
-    if (!confirmed) return;
-    await runAction(
-      () => promoteBackupAdmin(session.groupId!, String(member.uid), session.user!),
-      `Đã đặt ${memberLabel(member)} làm admin phụ.`,
-    );
-  }
-
-  async function handleDemote(member: AdminMember) {
-    if (!session.groupId || !session.user || !member.uid) return;
-    const confirmed = window.confirm(`Gỡ quyền admin phụ của ${memberLabel(member)}?`);
-    if (!confirmed) return;
-    await runAction(
-      () => demoteBackupAdmin(session.groupId!, String(member.uid), session.user!),
-      `Đã gỡ quyền admin phụ của ${memberLabel(member)}.`,
-    );
-  }
-
   if (!owner) {
     return (
       <EmptyState
@@ -106,110 +203,153 @@ export function AdminPage() {
     );
   }
 
+  const confirmMember = confirmState.member;
+  const confirmTitle =
+    confirmState.kind === "promote" ? "Đặt làm admin phụ" : "Gỡ quyền admin phụ";
+  const confirmDescription = confirmMember ? (
+    confirmState.kind === "promote" ? (
+      <>
+        Đặt <strong>{memberLabel(confirmMember)}</strong> làm admin phụ?
+        <br />
+        Hiện có {backupAdmins.length}/{MAX_BACKUP_ADMINS} admin phụ.
+      </>
+    ) : (
+      <>
+        Gỡ quyền admin phụ của <strong>{memberLabel(confirmMember)}</strong>?
+      </>
+    )
+  ) : null;
+
   return (
     <div className="admin-page">
-      <PageHeader title="Quản trị nhóm" subtitle="Quyền thành viên và sức khỏe dữ liệu nhóm" />
+      <PageHeader
+        title="Quản trị nhóm"
+        subtitle="Đặt tối đa 2 admin phụ và xem quyền từng vai trò"
+      />
 
       {loading ? (
-        <>
-          <SkeletonStatGrid count={4} />
-          <SkeletonList count={2} />
-        </>
+        <PageLoadingSkeleton stats={4} rows={2} />
       ) : errorMessage ? (
         <EmptyState title="Không thể tải trang quản trị" description={errorMessage} />
       ) : (
         <>
-          <section className="admin-stat-grid">
-            <article className="metric-tile">
-              <div className="metric-tile__label">Admin chính</div>
-              <div className="metric-tile__value">{overview?.owner ? memberLabel(overview.owner) : "Chưa có"}</div>
-            </article>
-            <article className="metric-tile">
-              <div className="metric-tile__label">Admin phụ</div>
-              <div className="metric-tile__value">{overview?.backupAdmin ? memberLabel(overview.backupAdmin) : "Chưa có"}</div>
-            </article>
-            <article className="metric-tile">
-              <div className="metric-tile__label">Số thành viên</div>
-              <div className="metric-tile__value">{overview?.memberCount || 0}</div>
-            </article>
-            <article className="metric-tile">
-              <div className="metric-tile__label">Allowlist</div>
-              <div className="metric-tile__value">{ALLOWED_EMAILS.length}</div>
-            </article>
-          </section>
-
-          <section className="card">
-            <h2 className="section-title">Sức khỏe dữ liệu nhóm</h2>
-            <div className="summary-strip">
-              <div className="summary-strip__item">
-                <span className="summary-strip__label">Thiếu memberId</span>
-                <span className="summary-strip__value">{overview?.diagnostics?.missingMemberId?.length || 0}</span>
-              </div>
-              <div className="summary-strip__item">
-                <span className="summary-strip__label">Role legacy</span>
-                <span className="summary-strip__value">{overview?.diagnostics?.legacyRoles?.length || 0}</span>
-              </div>
-              <div className="summary-strip__item">
-                <span className="summary-strip__label">Email mismatch</span>
-                <span className="summary-strip__value">{overview?.diagnostics?.emailMapMismatch?.length || 0}</span>
-              </div>
-              <div className="summary-strip__item">
-                <span className="summary-strip__label">Tiền nhà tháng này</span>
-                <span className="summary-strip__value">{overview?.currentPeriodStatus?.rentExists ? "Đã có" : "Chưa có"}</span>
-              </div>
+          <OverviewSection
+            title="Bảng quyền"
+            subtitle="Admin phụ giúp vận hành tháng; chỉ admin chính được xóa chi và đổi role"
+          >
+            <div className="role-matrix-wrap">
+              <table className="role-matrix">
+                <thead>
+                  <tr>
+                    <th>Quyền</th>
+                    <th>Admin chính</th>
+                    <th>Admin phụ</th>
+                    <th>Thành viên</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {ROLE_MATRIX.map((row) => (
+                    <tr key={row.capability}>
+                      <td>{row.capability}</td>
+                      <td className={row.owner ? "role-matrix__yes" : "role-matrix__no"}>
+                        {checkMark(row.owner)}
+                      </td>
+                      <td className={row.admin ? "role-matrix__yes" : "role-matrix__no"}>
+                        {checkMark(row.admin)}
+                      </td>
+                      <td className={row.member ? "role-matrix__yes" : "role-matrix__no"}>
+                        {checkMark(row.member)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
-          </section>
+          </OverviewSection>
 
-          <section className="card">
-            <div className="card__head">
-              <h2 className="section-title" style={{ marginBottom: 0 }}>
-                Danh sách thành viên
-              </h2>
-              <span className="form-hint">{actionPending ? "Đang cập nhật quyền..." : "Chỉ admin chính mới đổi được admin phụ"}</span>
-            </div>
+          <OverviewSection
+            title="Admin phụ hiện tại"
+            subtitle={`${backupAdmins.length}/${MAX_BACKUP_ADMINS} người · tối đa 2`}
+          >
+            {backupAdmins.length ? (
+              <div className="admin-backup-list">
+                {backupAdmins.map((admin) => (
+                  <div key={String(admin.uid || admin.id)} className="admin-backup-card">
+                    <div className="admin-backup-card__identity">
+                      <MemberAvatar
+                        memberId={String(admin.memberId || "")}
+                        label={memberLabel(admin)}
+                        size={44}
+                      />
+                      <div>
+                        <div className="admin-backup-card__name">{memberLabel(admin)}</div>
+                        <div className="admin-backup-card__meta">
+                          {String(admin.email || "-")}
+                          {admin.memberId ? ` · ${String(admin.memberId)}` : ""}
+                        </div>
+                      </div>
+                    </div>
+                    <Button
+                      variant="danger"
+                      className="btn--sm"
+                      disabled={actionPending}
+                      onClick={() => openDemoteConfirm(admin)}
+                    >
+                      Gỡ quyền
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <EmptyState
+                title="Chưa có admin phụ"
+                description="Chọn tối đa 2 thành viên bên dưới để đặt làm admin phụ."
+              />
+            )}
+          </OverviewSection>
+
+          <OverviewSection title="Thành viên" subtitle={`${members.length} người trong nhóm`}>
             <div className="admin-member-list">
               {members.map((member) => (
                 <article key={String(member.uid || member.id)} className="admin-member-card">
                   <div className="admin-member-card__top">
-                    <div>
-                      <div className="admin-member-card__name">{memberLabel(member)}</div>
-                      <div className="admin-member-card__meta">
-                        {String(member.email || "-")}
-                        <br />
-                        memberId: {String(member.memberId || "-")}
+                    <div className="admin-member-card__identity">
+                      <MemberAvatar
+                        memberId={String(member.memberId || "")}
+                        label={memberLabel(member)}
+                        size={40}
+                      />
+                      <div>
+                        <div className="admin-member-card__name">{memberLabel(member)}</div>
+                        <div className="admin-member-card__meta">
+                          {String(member.email || "-")}
+                          <br />
+                          memberId: {String(member.memberId || "-")}
+                        </div>
                       </div>
                     </div>
-                    <span className={`role-badge role-badge--${member.role}`}>{roleLabel(member.role)}</span>
-                  </div>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-                    {member.diagnostics?.length ? (
-                      member.diagnostics.map((item) => (
-                        <span key={item.code} className="status-badge status-badge--pending">
-                          {item.label}
-                        </span>
-                      ))
-                    ) : (
-                      <span className="status-badge status-badge--settled">OK</span>
-                    )}
+                    <span className={`role-badge role-badge--${member.role}`}>
+                      {roleLabel(member.role)}
+                    </span>
                   </div>
                   <div className="admin-member-card__actions">
                     {member.role === "owner" ? (
-                      <span className="form-hint">Cố định</span>
+                      <span className="form-hint">Cố định · toàn quyền</span>
                     ) : member.role === "admin" ? (
                       <Button
                         variant="danger"
                         className="btn--sm"
                         disabled={actionPending}
-                        onClick={() => void handleDemote(member)}
+                        onClick={() => openDemoteConfirm(member)}
                       >
                         Gỡ admin phụ
                       </Button>
                     ) : (
                       <Button
-                        variant="ghost"
+                        variant="primary"
                         className="btn--sm"
-                        disabled={actionPending}
-                        onClick={() => void handlePromote(member)}
+                        disabled={actionPending || !canPromoteMore}
+                        onClick={() => openPromoteConfirm(member)}
                       >
                         Đặt làm admin phụ
                       </Button>
@@ -217,10 +357,29 @@ export function AdminPage() {
                   </div>
                 </article>
               ))}
+              {!regularMembers.length && !backupAdmins.length ? (
+                <p className="form-hint">Chưa có thành viên thường để đặt admin phụ.</p>
+              ) : null}
+              {!canPromoteMore ? (
+                <p className="form-hint">
+                  Đã đủ {MAX_BACKUP_ADMINS} admin phụ. Gỡ một người nếu muốn đặt người khác.
+                </p>
+              ) : null}
             </div>
-          </section>
+          </OverviewSection>
         </>
       )}
+
+      <ConfirmDialog
+        open={confirmState.open}
+        title={confirmTitle}
+        description={confirmDescription}
+        confirmLabel={confirmState.kind === "promote" ? "Đặt admin phụ" : "Gỡ quyền"}
+        confirmVariant={confirmState.kind === "promote" ? "primary" : "danger"}
+        pending={actionPending}
+        onCancel={closeConfirm}
+        onConfirm={() => void runConfirmedAction()}
+      />
     </div>
   );
 }

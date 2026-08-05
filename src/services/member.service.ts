@@ -10,6 +10,7 @@ import {
 } from "firebase/firestore";
 import type { User } from "firebase/auth";
 import { db } from "../config/firebase";
+import { petAvatarById } from "../config/avatars";
 
 function requireDb(): Firestore {
   if (!db) {
@@ -22,6 +23,7 @@ type MemberProfile = Record<string, unknown> & { id: string };
 
 /**
  * Refresh own profile display fields. Identity/role stay on the existing doc.
+ * Không ghi đè avatar thú cưng bằng ảnh Google.
  */
 export async function upsertMemberProfile(groupId: string, user: User): Promise<void> {
   const firestore = requireDb();
@@ -38,7 +40,33 @@ export async function upsertMemberProfile(groupId: string, user: User): Promise<
     ref,
     {
       displayName: user.displayName || current.data()?.displayName || "",
-      photoURL: user.photoURL || current.data()?.photoURL || "",
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true },
+  );
+}
+
+export async function updateOwnAvatar(
+  groupId: string,
+  uid: string,
+  petId: string,
+): Promise<void> {
+  const pet = petAvatarById(petId);
+  if (!pet) {
+    throw new Error("Avatar không hợp lệ.");
+  }
+
+  const firestore = requireDb();
+  const ref = doc(firestore, "groups", groupId, "members", uid);
+  const current = await getDoc(ref);
+  if (!current.exists()) {
+    throw new Error("Không tìm thấy hồ sơ thành viên.");
+  }
+
+  await setDoc(
+    ref,
+    {
+      photoURL: pet.src,
       updatedAt: serverTimestamp(),
     },
     { merge: true },

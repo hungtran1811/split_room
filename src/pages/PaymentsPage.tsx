@@ -1,29 +1,43 @@
-import { useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { formatVND } from "../shared/lib/format";
 import { Button } from "../shared/ui/Button";
 import { BottomSheet } from "../shared/ui/BottomSheet";
 import { EmptyState } from "../shared/ui/EmptyState";
 import { LockBanner, PageHeader, RowAction } from "../shared/ui/PageHeader";
 import { SegmentedTabs, type SegmentedTab } from "../shared/ui/SegmentedTabs";
-import { SkeletonList } from "../shared/ui/Skeleton";
+import { PageLoadingSkeleton } from "../shared/ui/Skeleton";
 import { useToast } from "../shared/ui/Toast";
 import { useSession } from "../app/SessionContext";
 import { useLiveMonth } from "../hooks/useLiveMonth";
+import {
+  filterMyPreviousDebts,
+  usePreviousDebts,
+} from "../hooks/usePreviousDebts";
 import { ROSTER, ROSTER_IDS, nameOf } from "../config/roster";
 import { resolveMemberIdFromEmail } from "../config/members.map";
-import { canOperateMonth } from "../core/roles";
+import { canRecordPayment, canViewFullSettlement } from "../core/roles";
 import { getMonthRange, lastDayOfPeriod } from "../core/period";
 import { parseVndInput } from "../core/money";
 import { buildMonthlySettlementView } from "../domain/matrix/compute";
-import type { SettlementPlanItem } from "../domain/settlement/compute";
+import {
+  filterPaymentsForMember,
+  filterSettlementForMember,
+  type SettlementPlanItem,
+} from "../domain/settlement/compute";
 import type { PaymentDoc } from "../types/models";
 import { addPayment, removePayment, updatePayment } from "../services/payment.service";
 
+function formatPeriodShort(period: string): string {
+  const [year, month] = String(period || "").split("-");
+  if (!year || !month) return period || "";
+  return `Tháng ${Number(month)}/${year}`;
+}
+
 const TABS: SegmentedTab[] = [
-  { id: "suggest", label: "Gợi ý" },
-  { id: "history", label: "Lịch sử" },
-  { id: "matrix", label: "Ma trận" },
+  { id: "suggest", label: "Cần chuyển" },
+  { id: "history", label: "Đã chuyển" },
+  { id: "matrix", label: "Chi tiết" },
 ];
 
 function todayYmd(): string {
@@ -73,9 +87,18 @@ function emptyPaySheet(): PaySheetState {
 export function PaymentsPage() {
   const session = useSession();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { showToast } = useToast();
   const live = useLiveMonth("payments", session.groupId, session.selectedPeriod);
+  const previous = usePreviousDebts(session.groupId, session.selectedPeriod);
   const [activeTab, setActiveTab] = useState("suggest");
+
+  useEffect(() => {
+    const tab = searchParams.get("tab");
+    if (tab && TABS.some((item) => item.id === tab)) {
+      setActiveTab(tab);
+    }
+  }, [searchParams]);
   const [paySheet, setPaySheet] = useState<PaySheetState>(emptyPaySheet);
   const [payError, setPayError] = useState("");
   const [paySaving, setPaySaving] = useState(false);
@@ -88,7 +111,8 @@ export function PaymentsPage() {
     resolveMemberIdFromEmail(session.user?.email) ||
     ROSTER_IDS[0];
 
-  const canOperate = canOperateMonth(session.memberProfile) && !session.lockedSoft;
+  const canOperate = canRecordPayment(session.memberProfile) && !session.lockedSoft;
+  const viewFull = canViewFullSettlement(session.memberProfile);
 
   const expenses = live.expenses;
   const payments = live.payments as PaymentDoc[];
@@ -108,7 +132,10 @@ export function PaymentsPage() {
       ? (session.periodDoc.snapshot.settlementPlan as SettlementPlanItem[])
       : null;
 
-  const settlementPlan = frozenSettlementPlan || liveSettlement.settlementPlan;
+  const settlementPlanRaw = frozenSettlementPlan || liveSettlement.settlementPlan;
+  const settlementPlan = viewFull
+    ? settlementPlanRaw
+    : filterSettlementForMember(settlementPlanRaw, myMemberId);
 
   const orderedSettlement = useMemo(() => {
     return [...settlementPlan].sort((a, b) => {
@@ -117,6 +144,16 @@ export function PaymentsPage() {
       return aMine - bMine;
     });
   }, [settlementPlan, myMemberId]);
+
+  const visiblePayments = useMemo(() => {
+    return viewFull ? payments : filterPaymentsForMember(payments, myMemberId);
+  }, [payments, viewFull, myMemberId]);
+
+  const myOldDebts = useMemo(
+    () => filterMyPreviousDebts(previous.months, myMemberId),
+    [previous.months, myMemberId],
+  );
+  const oldDebtTotal = myOldDebts.reduce((sum, item) => sum + item.amount, 0);
 
   const ready = live.expensesReady && live.paymentsReady;
 
@@ -130,7 +167,7 @@ export function PaymentsPage() {
       maxAmount: lockAmount ? null : amount,
       lockAmount,
       date: defaultPaymentDate(session.selectedPeriod),
-      note: lockAmount ? "Trả đủ theo cấn trừ" : "Trả một phần theo cấn trừ",
+      note: lockAmount ? "Đã chuyển đủ" : "Đã chuyển một phần",
       title: lockAmount ? "Ghi nhận trả đủ" : "Ghi nhận trả một phần",
     });
     setPayError("");
@@ -146,7 +183,7 @@ export function PaymentsPage() {
       return;
     }
     if (typeof paySheet.maxAmount === "number" && amount > paySheet.maxAmount) {
-      setPayError("Không được vượt quá số tiền đang nợ theo cấn trừ.");
+      setPayError("Số tiền không được lớn hơn số còn cần chuyển.");
       return;
     }
     if (!paySheet.date || paySheet.date < start || paySheet.date >= end) {
@@ -219,75 +256,149 @@ export function PaymentsPage() {
   }
 
   const sortedPayments = useMemo(
-    () => [...payments].sort((a, b) => String(b.date || "").localeCompare(String(a.date || ""))),
-    [payments],
+    () =>
+      [...visiblePayments].sort((a, b) => String(b.date || "").localeCompare(String(a.date || ""))),
+    [visiblePayments],
   );
+
+  const paymentTabs = viewFull ? TABS : TABS.filter((tab) => tab.id !== "matrix");
 
   return (
     <div className="payments-page">
-      <PageHeader title="Cấn trừ" subtitle={`Tháng ${session.selectedPeriod}`} />
+      <PageHeader
+        title="Thanh toán"
+        subtitle={
+          viewFull
+            ? `Tháng ${session.selectedPeriod} · ai cần chuyển cho ai`
+            : `Tháng ${session.selectedPeriod} · chỉ khoản nợ liên quan bạn`
+        }
+      />
 
-      <SegmentedTabs tabs={TABS} value={activeTab} onChange={setActiveTab} ariaLabel="Chuyển tab cấn trừ" />
+      <SegmentedTabs
+        tabs={paymentTabs}
+        value={activeTab === "matrix" && !viewFull ? "suggest" : activeTab}
+        onChange={setActiveTab}
+        ariaLabel="Chuyển mục thanh toán"
+      />
 
       {session.lockedSoft ? (
-        <LockBanner>Tháng {session.selectedPeriod} đã chốt — không thể ghi nhận thanh toán mới.</LockBanner>
+        <LockBanner>
+          Tháng {session.selectedPeriod} đã khóa — không ghi nhận chuyển tiền mới.
+        </LockBanner>
       ) : null}
 
       <div className="payments-page__body">
         {!ready ? (
-          <SkeletonList count={3} />
+          <PageLoadingSkeleton stats={0} rows={4} />
         ) : activeTab === "suggest" ? (
-          <section className="card">
-            <div className="card__head">
-              <h2 className="card__title">Gợi ý cấn trừ tháng này</h2>
-              {frozenSettlementPlan ? <span className="status-badge status-badge--pending">Đã chốt</span> : null}
-            </div>
-            {!orderedSettlement.length ? (
-              <EmptyState
-                title={expenses.length ? "Đã cân bằng" : "Chưa có chi tiêu"}
-                description={
-                  expenses.length
-                    ? "Không còn khoản cấn trừ nào trong tháng này."
-                    : "Thêm chi tiêu trước để hệ thống gợi ý cấn trừ."
-                }
-                action={
-                  <Button variant="primary" onClick={() => navigate("/expenses")}>
-                    {expenses.length ? "Xem chi tiêu" : "Thêm chi tiêu"}
-                  </Button>
-                }
-              />
-            ) : (
-              <div className="stack-list">
-                {orderedSettlement.map((item, index) => {
-                  const mine = item.fromId === myMemberId;
-                  return (
-                    <article key={`${item.fromId}-${item.toId}-${index}`} className={`list-row ${mine ? "settlement-item--mine" : ""}`.trim()}>
+          <section className="payments-suggest">
+            {myOldDebts.length > 0 ? (
+              <div className="card card--note">
+                <div className="card__head">
+                  <h2 className="card__title">Tháng trước còn lại</h2>
+                  <span className="money-due">{formatVND(oldDebtTotal)}</span>
+                </div>
+                <div className="stack-list">
+                  {myOldDebts.map((item) => (
+                    <article
+                      key={`${item.period}-${item.fromId}-${item.toId}`}
+                      className="list-row settlement-item--mine"
+                    >
                       <div className="list-row__body">
-                        <div className="list-row__title">
-                          {nameOf(item.fromId)} → {nameOf(item.toId)}
-                        </div>
-                        {mine ? <div className="list-row__subtitle">Bạn phải trả</div> : null}
+                        <div className="list-row__title">Bạn → {nameOf(item.toId)}</div>
+                        <div className="list-row__subtitle">{formatPeriodShort(item.period)}</div>
                       </div>
-                      <div className="list-row__amount">{formatVND(item.amount)}</div>
-                      {canOperate ? (
-                        <div className="list-row__actions">
-                          <RowAction label="Đủ" variant="primary" onClick={() => openPaySheet(item, true)} />
-                          <RowAction label="Một phần" onClick={() => openPaySheet(item, false)} />
-                        </div>
-                      ) : null}
+                      <div className="list-row__amount money-due">{formatVND(item.amount)}</div>
                     </article>
-                  );
-                })}
+                  ))}
+                </div>
               </div>
-            )}
+            ) : null}
+
+            <div className="card">
+              <div className="card__head">
+                <h2 className="card__title">{viewFull ? "Ai cần chuyển" : "Khoản nợ liên quan bạn"}</h2>
+                {frozenSettlementPlan ? (
+                  <span className="status-badge status-badge--pending">Đã khóa tháng</span>
+                ) : null}
+              </div>
+              {!orderedSettlement.length ? (
+                <EmptyState
+                  title={
+                    myOldDebts.length
+                      ? "Tháng này không còn khoản cần chuyển"
+                      : expenses.length
+                        ? "Không còn ai cần chuyển"
+                        : "Chưa có chi tiêu"
+                  }
+                  description={
+                    myOldDebts.length
+                      ? "Bạn vẫn còn khoản tháng trước ở danh sách trên."
+                      : expenses.length
+                        ? "Mọi người đã ổn trong tháng này."
+                        : "Thêm khoản chi trước, app sẽ gợi ý ai cần chuyển cho ai."
+                  }
+                  action={
+                    <Button variant="primary" onClick={() => navigate("/expenses")}>
+                      {expenses.length ? "Xem chi tiêu" : "Thêm khoản chi"}
+                    </Button>
+                  }
+                />
+              ) : (
+                <div className="stack-list">
+                  {orderedSettlement.map((item, index) => {
+                    const iPay = item.fromId === myMemberId;
+                    const iReceive = item.toId === myMemberId;
+                    const mine = iPay || iReceive;
+                    return (
+                      <article
+                        key={`${item.fromId}-${item.toId}-${index}`}
+                        className={`list-row ${mine ? "settlement-item--mine" : ""}`.trim()}
+                      >
+                        <div className="list-row__body">
+                          <div className="list-row__title">
+                            {iPay
+                              ? `Bạn → ${nameOf(item.toId)}`
+                              : iReceive
+                                ? `${nameOf(item.fromId)} → Bạn`
+                                : `${nameOf(item.fromId)} → ${nameOf(item.toId)}`}
+                          </div>
+                          {mine ? (
+                            <div className="list-row__subtitle">
+                              {iPay ? "Bạn cần chuyển" : "Bạn sẽ nhận"}
+                            </div>
+                          ) : null}
+                        </div>
+                        <div className={`list-row__amount ${iPay ? "money-due" : ""}`.trim()}>
+                          {formatVND(item.amount)}
+                        </div>
+                        {canOperate ? (
+                          <div className="list-row__actions">
+                            <RowAction
+                              label="Đã chuyển"
+                              variant="primary"
+                              onClick={() => openPaySheet(item, true)}
+                            />
+                            <RowAction
+                              label="Một phần"
+                              onClick={() => openPaySheet(item, false)}
+                            />
+                          </div>
+                        ) : null}
+                      </article>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           </section>
         ) : activeTab === "history" ? (
           <section className="card">
-            <h2 className="card__title">Lịch sử thanh toán tháng này</h2>
+            <h2 className="card__title">Đã chuyển trong tháng</h2>
             {!sortedPayments.length ? (
               <EmptyState
-                title="Chưa có giao dịch"
-                description="Ghi nhận thanh toán từ tab Gợi ý hoặc sau khi có chi tiêu trong tháng."
+                title="Chưa ghi nhận lần chuyển nào"
+                description="Khi ai đó chuyển tiền, bấm “Đã chuyển” ở mục Cần chuyển."
               />
             ) : (
               <div className="stack-list">
@@ -318,26 +429,32 @@ export function PaymentsPage() {
           <>
             <div className="summary-strip">
               <div className="summary-strip__item">
-                <span className="summary-strip__label">Tổng nợ gốc</span>
+                <span className="summary-strip__label">Tổng từ chi chung</span>
                 <span className="summary-strip__value">{formatVND(liveSettlement.totals.grossDebtTotal)}</span>
               </div>
               <div className="summary-strip__item">
-                <span className="summary-strip__label">Payment đã áp</span>
+                <span className="summary-strip__label">Đã chuyển</span>
                 <span className="summary-strip__value">{formatVND(liveSettlement.paymentsAppliedTotal)}</span>
               </div>
               <div className="summary-strip__item">
-                <span className="summary-strip__label">Còn phải thanh toán</span>
-                <span className="summary-strip__value">{formatVND(liveSettlement.totals.remainingDebtTotal)}</span>
+                <span className="summary-strip__label">Còn lại</span>
+                <span
+                  className={`summary-strip__value ${
+                    liveSettlement.totals.remainingDebtTotal > 0 ? "money-due" : ""
+                  }`.trim()}
+                >
+                  {formatVND(liveSettlement.totals.remainingDebtTotal)}
+                </span>
               </div>
             </div>
 
             <section className="card">
-              <h2 className="card__title">Ma trận nợ gốc</h2>
+              <h2 className="card__title">Bảng ai còn nợ ai</h2>
               <div className="matrix-table-wrap">
                 <table className="matrix-table">
                   <thead>
                     <tr>
-                      <th>Nợ \ Được nhận</th>
+                      <th></th>
                       {ROSTER.map((member) => (
                         <th key={member.id}>{member.name}</th>
                       ))}
@@ -361,15 +478,20 @@ export function PaymentsPage() {
                   </tbody>
                 </table>
               </div>
-              <p className="matrix-legend">Hàng = con nợ · Cột = chủ nợ</p>
+              <p className="matrix-legend">Ô giao nhau: người bên trái còn nợ người phía trên</p>
             </section>
 
             <section className="card">
-              <h2 className="card__title">Số dư sau khi áp payment</h2>
+              <h2 className="card__title">Tóm tắt từng người</h2>
               <div>
                 {ROSTER.map((member) => {
                   const value = Number(liveSettlement.balances?.[member.id] || 0);
-                  const label = value > 0 ? "Đã trả nhiều hơn phần đang nợ" : value < 0 ? "Đang còn nợ trong tháng" : "Đã cân bằng";
+                  const label =
+                    value > 0
+                      ? "Đang được nhận thêm"
+                      : value < 0
+                        ? "Còn cần chuyển"
+                        : "Ổn";
                   return (
                     <div key={member.id} className="balances-list__row">
                       <div>
@@ -390,8 +512,8 @@ export function PaymentsPage() {
         <div className="form-grid">
           <p className="form-hint">
             {paySheet.lockAmount
-              ? `Trả đủ theo cấn trừ: ${formatVND(Number(paySheet.amount))}.`
-              : `Tối đa theo cấn trừ: ${formatVND(paySheet.maxAmount || 0)}.`}
+              ? `Ghi nhận đã chuyển đủ ${formatVND(Number(paySheet.amount))}.`
+              : `Số còn cần chuyển tối đa ${formatVND(paySheet.maxAmount || 0)}.`}
           </p>
           <div className="form-grid form-grid--2">
             <div className="form-field">

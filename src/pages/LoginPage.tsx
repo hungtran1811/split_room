@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { firebaseConfigured } from "../config/firebase";
 import { getAuthErrorMessage, loginWithGoogle } from "../services/auth.service";
+import { BrandLogo } from "../shared/ui/BrandLogo";
 
 export function LoginPage() {
   const [message, setMessage] = useState("");
@@ -10,7 +11,8 @@ export function LoginPage() {
     return (
       <div className="login-page">
         <div className="login-card">
-          <div className="login-card__brand">Split Room</div>
+          <BrandLogo size={64} className="login-card__logo" />
+          <div className="login-card__brand">SplitRoom</div>
           <p className="login-card__subtitle">
             Thiếu VITE_FB_API_KEY hoặc VITE_FB_PROJECT_ID. Sao chép .env.example thành .env.local, điền
             cấu hình Firebase, rồi chạy lại ứng dụng.
@@ -34,10 +36,10 @@ export function LoginPage() {
   return (
     <div className="login-page">
       <div className="login-hero">
-        <div className="login-hero__mark" aria-hidden="true" />
-        <h1 className="login-hero__brand">Split Room</h1>
+        <BrandLogo size={96} className="login-hero__logo" decorative />
+        <h1 className="login-hero__brand">SplitRoom</h1>
         <p className="login-hero__subtitle">
-          Sổ chi tiêu phòng rõ ràng — chia đều, cấn trừ, thu tiền nhà trong một chỗ.
+          Ghi chi chung, nhắc ai trả ai, và theo dõi tiền nhà — đơn giản cho cả nhóm.
         </p>
       </div>
       <div className="login-actions">

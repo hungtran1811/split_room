@@ -84,7 +84,7 @@ describe("admin service", () => {
     );
   });
 
-  it("builds admin overview with owner, backup admin, and current month status", async () => {
+  it("builds admin overview with owner, backup admins, and current month status", async () => {
     firestoreMocks.getDocs.mockResolvedValue(
       membersSnapshot([
         {
@@ -99,6 +99,12 @@ describe("admin service", () => {
           memberId: "thinh",
           role: "admin",
         },
+        {
+          uid: "backup-admin-2-uid",
+          email: "huynhthanhthao14062001@gmail.com",
+          memberId: "thao",
+          role: "admin",
+        },
       ]),
     );
     getRentByPeriod.mockResolvedValue({ period: "2026-03", total: 1000 });
@@ -111,14 +117,16 @@ describe("admin service", () => {
     const overview = await getAdminOverview("P102", "2026-03");
 
     expect(overview.owner?.memberId).toBe("hung");
-    expect(overview.backupAdmin?.memberId).toBe("thinh");
+    expect(overview.backupAdmin?.memberId).toBe("thao");
+    expect(overview.backupAdmins.map((item) => item.memberId)).toEqual(["thao", "thinh"]);
+    expect(overview.maxBackupAdmins).toBe(2);
     expect(overview.currentPeriodStatus).toEqual({
       rentExists: true,
       reportSnapshotExists: true,
     });
   });
 
-  it("promotes a backup admin and demotes the old one in one batch", async () => {
+  it("promotes a backup admin without demoting existing admins under the limit", async () => {
     firestoreMocks.getDocs.mockResolvedValue(
       membersSnapshot([
         {
@@ -146,20 +154,51 @@ describe("admin service", () => {
       uid: "8tgX0c2IBbTx0k0oIZgn7w2H12b2",
     });
 
-    expect(batchSet).toHaveBeenCalledTimes(2);
-    expect(batchSet).toHaveBeenNthCalledWith(
-      1,
-      "groups/P102/members/old-admin-uid",
-      expect.objectContaining({ role: "member" }),
-      { merge: true },
-    );
-    expect(batchSet).toHaveBeenNthCalledWith(
-      2,
+    expect(batchSet).toHaveBeenCalledTimes(1);
+    expect(batchSet).toHaveBeenCalledWith(
       "groups/P102/members/target-uid",
       expect.objectContaining({ role: "admin" }),
       { merge: true },
     );
     expect(batchCommit).toHaveBeenCalledTimes(1);
+  });
+
+  it("blocks promoting a third backup admin", async () => {
+    firestoreMocks.getDocs.mockResolvedValue(
+      membersSnapshot([
+        {
+          uid: "8tgX0c2IBbTx0k0oIZgn7w2H12b2",
+          email: "hungtran00.nt@gmail.com",
+          memberId: "hung",
+          role: "owner",
+        },
+        {
+          uid: "admin-1",
+          email: "huynhnhatthinh.2003@gmail.com",
+          memberId: "thinh",
+          role: "admin",
+        },
+        {
+          uid: "admin-2",
+          email: "huynhthanhthao14062001@gmail.com",
+          memberId: "thao",
+          role: "admin",
+        },
+        {
+          uid: "target-uid",
+          email: "thanhthuyhuynh1712@gmail.com",
+          memberId: "thuy",
+          role: "member",
+        },
+      ]),
+    );
+
+    await expect(
+      promoteBackupAdmin("P102", "target-uid", {
+        uid: "8tgX0c2IBbTx0k0oIZgn7w2H12b2",
+      }),
+    ).rejects.toThrow(/Đã đủ 2 admin phụ/);
+    expect(batchCommit).not.toHaveBeenCalled();
   });
 
   it("demotes the current backup admin", async () => {

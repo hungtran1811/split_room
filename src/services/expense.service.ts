@@ -14,6 +14,7 @@ import {
   type Unsubscribe,
 } from "firebase/firestore";
 import { db } from "../config/firebase";
+import { getMonthRange } from "../core/period";
 import { clearHistoricalCache } from "./live-data-hub";
 
 function requireDb(): Firestore {
@@ -21,6 +22,24 @@ function requireDb(): Firestore {
     throw new Error("Firestore chưa được cấu hình.");
   }
   return db;
+}
+
+type ExpenseRow = Record<string, unknown> & { id: string };
+
+type AllExpensesCache = {
+  groupId: string;
+  fetchedAt: number;
+  items: ExpenseRow[];
+};
+
+const ALL_EXPENSES_TTL_MS = 5 * 60 * 1000;
+let allExpensesCache: AllExpensesCache | null = null;
+
+function invalidateExpenseReadCaches(groupId?: string): void {
+  if (!groupId || allExpensesCache?.groupId === groupId) {
+    allExpensesCache = null;
+  }
+  clearHistoricalCache();
 }
 
 export async function addExpense(
@@ -34,7 +53,7 @@ export async function addExpense(
     createdAt: serverTimestamp(),
   };
   const res = await addDoc(colRef, data);
-  clearHistoricalCache();
+  invalidateExpenseReadCaches(groupId);
   return res.id;
 }
 
@@ -42,7 +61,7 @@ export async function removeExpense(groupId: string, expenseId: string): Promise
   const firestore = requireDb();
   const ref = doc(firestore, "groups", groupId, "expenses", expenseId);
   await deleteDoc(ref);
-  clearHistoricalCache();
+  invalidateExpenseReadCaches(groupId);
 }
 
 export async function fetchExpensesBefore(
@@ -59,6 +78,42 @@ export async function fetchExpensesBefore(
   );
   const snap = await getDocs(q);
   return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+}
+
+export async function fetchAllExpenses(
+  groupId: string,
+  options: { force?: boolean } = {},
+): Promise<ExpenseRow[]> {
+  const now = Date.now();
+  if (
+    !options.force &&
+    allExpensesCache &&
+    allExpensesCache.groupId === groupId &&
+    now - allExpensesCache.fetchedAt < ALL_EXPENSES_TTL_MS
+  ) {
+    return allExpensesCache.items;
+  }
+
+  const firestore = requireDb();
+  const colRef = collection(firestore, "groups", groupId, "expenses");
+  const q = query(colRef, orderBy("date", "desc"));
+  const snap = await getDocs(q);
+  const items = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  allExpensesCache = { groupId, fetchedAt: now, items };
+  return items;
+}
+
+export async function fetchExpensesByPeriod(
+  groupId: string,
+  period: string,
+): Promise<ExpenseRow[]> {
+  // Tái dùng cache all-time khi có để tránh query tháng trước riêng.
+  const all = await fetchAllExpenses(groupId);
+  const { start, end } = getMonthRange(period);
+  return all.filter((item) => {
+    const date = String(item.date || "");
+    return date >= start && date < end;
+  });
 }
 
 export function watchExpensesByRange(
@@ -95,5 +150,5 @@ export async function updateExpense(
     ...patch,
     updatedAt: serverTimestamp(),
   });
-  clearHistoricalCache();
+  invalidateExpenseReadCaches(groupId);
 }

@@ -2,13 +2,13 @@ import { useEffect, useState } from "react";
 import { formatVND } from "../shared/lib/format";
 import { Button } from "../shared/ui/Button";
 import { LockBanner, PageHeader } from "../shared/ui/PageHeader";
-import { SkeletonList } from "../shared/ui/Skeleton";
+import { PageLoadingSkeleton } from "../shared/ui/Skeleton";
 import { useToast } from "../shared/ui/Toast";
 import { useSession } from "../app/SessionContext";
 import { useLiveMonth } from "../hooks/useLiveMonth";
 import { ROSTER, ROSTER_IDS, nameOf } from "../config/roster";
 import { OWNER_MEMBER_ID } from "../config/constants";
-import { canOperateMonth } from "../core/roles";
+import { canEditRent } from "../core/roles";
 import {
   buildEqualShares,
   clampNonNegative,
@@ -134,7 +134,7 @@ export function RentPage() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
 
-  const canEdit = canOperateMonth(session.memberProfile) && !session.lockedSoft;
+  const canEdit = canEditRent(session.memberProfile) && !session.lockedSoft;
 
   useEffect(() => {
     if (live.rentReady) {
@@ -250,7 +250,7 @@ export function RentPage() {
   if (!live.rentReady) {
     return (
       <div className="rent-page">
-        <SkeletonList count={3} />
+        <PageLoadingSkeleton stats={0} rows={4} />
       </div>
     );
   }
@@ -259,11 +259,16 @@ export function RentPage() {
 
   return (
     <div className="rent-page">
-      <PageHeader title="Tiền nhà" subtitle={`Tháng ${session.selectedPeriod}`} />
+      <PageHeader
+        title="Tiền nhà"
+        subtitle={`Tháng ${session.selectedPeriod} · phần mỗi người và đã trả`}
+      />
 
       {session.lockedSoft ? (
-        <LockBanner>Tháng {session.selectedPeriod} đã chốt — chỉ xem, không ghi mới.</LockBanner>
-      ) : !canOperateMonth(session.memberProfile) ? (
+        <LockBanner>
+          Tháng {session.selectedPeriod} đã khóa — chỉ xem, không sửa tiền nhà.
+        </LockBanner>
+      ) : !canEditRent(session.memberProfile) ? (
         <div className="readonly-banner">Bạn không có quyền chỉnh sửa tiền nhà.</div>
       ) : null}
 

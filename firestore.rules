@@ -245,7 +245,7 @@ service cloud.firestore {
         allow create: if isGroupMember(groupId)
           && validExpenseShape()
           && !periodIsLocked(groupId, datePeriod(request.resource.data.date));
-        allow update, delete: if isGroupOperator(groupId)
+        allow update: if isGroupOperator(groupId)
           && (
             !resource.data.keys().hasAny(["date"])
             || !periodIsLocked(groupId, datePeriod(resource.data.date))
@@ -253,6 +253,11 @@ service cloud.firestore {
           && (
             !request.resource.data.keys().hasAny(["date"])
             || !periodIsLocked(groupId, datePeriod(request.resource.data.date))
+          );
+        allow delete: if isGroupOwner(groupId)
+          && (
+            !resource.data.keys().hasAny(["date"])
+            || !periodIsLocked(groupId, datePeriod(resource.data.date))
           );
       }
 

@@ -146,9 +146,12 @@ export async function listGroupMembers(groupId: string): Promise<AdminMember[]> 
   }
 }
 
+export const MAX_BACKUP_ADMINS = 2;
+
 export async function getAdminOverview(groupId: string, period: string) {
   try {
     const members = await listGroupMembers(groupId);
+    const backupAdmins = members.filter((member) => member.role === "admin");
     const [rent, periodDoc] = await Promise.all([
       getRentByPeriod(groupId, period),
       getPeriod(groupId, period),
@@ -157,7 +160,9 @@ export async function getAdminOverview(groupId: string, period: string) {
     return {
       groupId,
       owner: members.find((member) => member.role === "owner") || null,
-      backupAdmin: members.find((member) => member.role === "admin") || null,
+      backupAdmin: backupAdmins[0] || null,
+      backupAdmins,
+      maxBackupAdmins: MAX_BACKUP_ADMINS,
       memberCount: members.length,
       diagnostics: collectDiagnostics(members),
       currentPeriodStatus: {
@@ -188,21 +193,19 @@ export async function promoteBackupAdmin(
     if (target.role === "owner") {
       throw new Error("Admin chính không thể đổi thành admin phụ.");
     }
+    if (target.role === "admin") {
+      throw new Error("Thành viên này đã là admin phụ.");
+    }
+
+    const currentAdmins = members.filter((member) => member.role === "admin");
+    if (currentAdmins.length >= MAX_BACKUP_ADMINS) {
+      throw new Error(
+        `Đã đủ ${MAX_BACKUP_ADMINS} admin phụ. Hãy gỡ một người trước khi đặt thêm.`,
+      );
+    }
 
     const firestore = requireDb();
     const batch = writeBatch(firestore);
-    members
-      .filter(
-        (member) => member.role === "admin" && member.uid !== targetUid,
-      )
-      .forEach((member) => {
-        batch.set(
-          memberDocRef(groupId, String(member.uid)),
-          buildRolePatch("member"),
-          { merge: true },
-        );
-      });
-
     batch.set(
       memberDocRef(groupId, targetUid),
       buildRolePatch("admin"),
@@ -211,7 +214,9 @@ export async function promoteBackupAdmin(
 
     await batch.commit();
   } catch (error) {
-    if ((error as { code?: string })?.code === "permission-denied") throw error;
+    const code = (error as { code?: string })?.code;
+    if (code === "permission-denied") throw error;
+    if (error instanceof Error && !code) throw error;
     throw wrapFirestoreError(
       error,
       "Không thể đặt thành viên làm admin phụ.",
@@ -245,7 +250,9 @@ export async function demoteBackupAdmin(
     );
     await batch.commit();
   } catch (error) {
-    if ((error as { code?: string })?.code === "permission-denied") throw error;
+    const code = (error as { code?: string })?.code;
+    if (code === "permission-denied") throw error;
+    if (error instanceof Error && !code) throw error;
     throw wrapFirestoreError(error, "Không thể gỡ quyền admin phụ.");
   }
 }

@@ -14,7 +14,10 @@ export function MetricTile({ label, value, hint, tone = "neutral" }: MetricTileP
     <article className={`metric-tile metric-tile--${tone}`}>
       <div className="metric-tile__label">{label}</div>
       <div className="metric-tile__value">{value}</div>
-      {hint ? <div className="metric-tile__hint">{hint}</div> : null}
+      {/* Luôn giữ hàng hint để các card trong cùng hàng căn value thẳng hàng. */}
+      <div className={`metric-tile__hint${hint ? "" : " metric-tile__hint--empty"}`}>
+        {hint || "\u00A0"}
+      </div>
     </article>
   );
 }

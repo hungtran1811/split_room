@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   canAddExpense,
+  canDeleteExpense,
+  canEditExpense,
+  canEditRent,
   canOperateMonth,
+  canRecordPayment,
+  canViewFullSettlement,
   isOwnerProfile,
   normalizeMemberRole,
 } from "../src/core/roles.js";
@@ -124,5 +129,37 @@ describe("roles", () => {
         role: "admin",
       }),
     ).toBe(false);
+  });
+
+  it("lets owner and admin edit expenses but only owner delete", () => {
+    const owner = { uid: "owner-uid", memberId: "hung", role: "owner" };
+    const admin = { uid: "admin-uid", memberId: "thinh", role: "admin" };
+    const member = { uid: "member-uid", memberId: "thao", role: "member" };
+
+    expect(canEditExpense(owner)).toBe(true);
+    expect(canEditExpense(admin)).toBe(true);
+    expect(canEditExpense(member)).toBe(false);
+
+    expect(canDeleteExpense(owner)).toBe(true);
+    expect(canDeleteExpense(admin)).toBe(false);
+    expect(canDeleteExpense(member)).toBe(false);
+  });
+
+  it("lets operators record payments and edit rent; members see personal settlement only", () => {
+    const owner = { uid: "owner-uid", memberId: "hung", role: "owner" };
+    const admin = { uid: "admin-uid", memberId: "thinh", role: "admin" };
+    const member = { uid: "member-uid", memberId: "thao", role: "member" };
+
+    expect(canRecordPayment(owner)).toBe(true);
+    expect(canRecordPayment(admin)).toBe(true);
+    expect(canRecordPayment(member)).toBe(false);
+
+    expect(canEditRent(owner)).toBe(true);
+    expect(canEditRent(admin)).toBe(true);
+    expect(canEditRent(member)).toBe(false);
+
+    expect(canViewFullSettlement(owner)).toBe(true);
+    expect(canViewFullSettlement(admin)).toBe(true);
+    expect(canViewFullSettlement(member)).toBe(false);
   });
 });

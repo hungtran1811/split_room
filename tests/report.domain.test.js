@@ -152,3 +152,87 @@ describe("report domain", () => {
     expect(report.stats.settlementCount).toBe(canonical.settlementPlan.length);
   });
 });
+
+describe("top payers", () => {
+  it("ranks payers by total amount paid", async () => {
+    const { buildTopPayers } = await import("../src/domain/report/top-payers.js");
+    const rows = buildTopPayers(
+      [
+        { payerId: "hung", amount: 100000 },
+        { payerId: "thao", amount: 250000 },
+        { payerId: "hung", amount: 50000 },
+        { payerId: "thinh", amount: 0 },
+        { payerId: "", amount: 90000 },
+      ],
+      { limit: 2 },
+    );
+
+    expect(rows).toEqual([
+      { payerId: "thao", total: 250000, count: 1 },
+      { payerId: "hung", total: 150000, count: 2 },
+    ]);
+  });
+});
+
+describe("report insights", () => {
+  it("builds daily spend, largest expenses, month compare, and rent insight", async () => {
+    const {
+      buildDailySpend,
+      buildLargestExpenses,
+      buildMonthCompare,
+      buildRentCollectionInsight,
+    } = await import("../src/domain/report/insights.js");
+
+    const expenses = [
+      { id: "a", date: "2026-08-01", amount: 100000, payerId: "hung", note: "Cafe" },
+      { id: "b", date: "2026-08-01", amount: 50000, payerId: "thao", note: "An sang" },
+      { id: "c", date: "2026-08-10", amount: 300000, payerId: "thinh", note: "Sieu thi" },
+      { id: "d", date: "2026-07-20", amount: 900000, payerId: "hung", note: "Out of range" },
+    ];
+
+    expect(buildDailySpend(expenses, "2026-08")).toEqual([
+      { date: "2026-08-01", total: 150000, count: 2 },
+      { date: "2026-08-10", total: 300000, count: 1 },
+    ]);
+
+    expect(buildLargestExpenses(expenses, { limit: 2 })).toEqual([
+      {
+        id: "d",
+        date: "2026-07-20",
+        amount: 900000,
+        payerId: "hung",
+        note: "Out of range",
+      },
+      {
+        id: "c",
+        date: "2026-08-10",
+        amount: 300000,
+        payerId: "thinh",
+        note: "Sieu thi",
+      },
+    ]);
+
+    const compare = buildMonthCompare(
+      expenses.filter((item) => item.date.startsWith("2026-08")),
+      expenses.filter((item) => item.date.startsWith("2026-07")),
+      "2026-08",
+      "2026-07",
+    );
+    expect(compare.currentTotal).toBe(450000);
+    expect(compare.previousTotal).toBe(900000);
+    expect(compare.deltaTotal).toBe(-450000);
+    expect(compare.deltaPct).toBe(-50);
+
+    const rent = buildRentCollectionInsight({
+      payerId: "hung",
+      total: 4000000,
+      shares: { hung: 1000000, thao: 1000000, thinh: 1000000, thuy: 1000000 },
+      paid: { thao: 500000, thinh: 1000000, thuy: 0 },
+    });
+    expect(rent?.collected).toBe(1500000);
+    expect(rent?.remaining).toBe(1500000);
+    expect(rent?.rows.find((row) => row.memberId === "thuy")?.due).toBe(1000000);
+    expect(rent?.rows.find((row) => row.memberId === "hung")?.due).toBe(0);
+    expect(buildRentCollectionInsight(null)).toBeNull();
+  });
+});

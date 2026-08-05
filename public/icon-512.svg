@@ -1,4 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Split Room">
-  <rect width="512" height="512" rx="96" fill="#1d4ed8"/>
-  <text x="256" y="310" text-anchor="middle" font-family="Arial, sans-serif" font-size="180" font-weight="700" fill="#ffffff">SR</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="SplitRoom">
+  <rect width="512" height="512" rx="112" fill="#2563EB"/>
+  <text x="256" y="278" text-anchor="middle" font-family="Exo 2, Arial, Helvetica, sans-serif" font-size="92" font-weight="800" fill="#ffffff" letter-spacing="-2">SplitRoom</text>
+  <rect x="156" y="318" width="200" height="14" rx="7" fill="#93C5FD"/>
 </svg>

@@ -22,7 +22,6 @@ import { ensureDefaultGroup } from "../services/group.service";
 import {
   upsertMemberProfile,
   watchGroupMembers,
-  watchMyMemberProfile,
 } from "../services/member.service";
 import { getPeriod } from "../services/period.service";
 
@@ -66,13 +65,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [selectedPeriod, setSelectedPeriodState] = useState<string>(readStoredPeriod);
   const [periodDoc, setPeriodDoc] = useState<PeriodDoc | null>(null);
 
-  const memberUnsubRef = useRef<Unsubscribe | null>(null);
   const groupUnsubRef = useRef<Unsubscribe | null>(null);
   const periodTokenRef = useRef(0);
 
   const stopGroupSubscriptions = useCallback(() => {
-    memberUnsubRef.current?.();
-    memberUnsubRef.current = null;
     groupUnsubRef.current?.();
     groupUnsubRef.current = null;
   }, []);
@@ -139,13 +135,18 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         await upsertMemberProfile(nextGroupId, nextUser);
 
         stopGroupSubscriptions();
-        memberUnsubRef.current = watchMyMemberProfile(
-          nextGroupId,
-          nextUser.uid,
-          (profile) => setMemberProfile(profile as MemberProfile | null),
-        );
+        // Một listener members đủ cho cả roster + profile của mình (tiết kiệm quota).
         groupUnsubRef.current = watchGroupMembers(nextGroupId, (nextMembers) => {
-          setMembers(nextMembers as MemberProfile[]);
+          const typed = nextMembers as MemberProfile[];
+          setMembers(typed);
+          const mine =
+            typed.find(
+              (member) =>
+                member.uid === nextUser.uid ||
+                member.id === nextUser.uid ||
+                String(member.id || "") === nextUser.uid,
+            ) || null;
+          setMemberProfile(mine);
         });
 
         setBootStatus("ready");

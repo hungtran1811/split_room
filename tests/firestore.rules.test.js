@@ -423,6 +423,33 @@ describe("firestore rules", () => {
     await assertFails(expenseRef.delete());
   });
 
+  it("allows admin to update expenses but only owner can delete", async () => {
+    await seedNestedDocs();
+    const adminDb = authenticatedDb(ADMIN_UID);
+    const ownerDb = authenticatedDb(OWNER_UID);
+    const seededRef = adminDb.doc(`groups/${GROUP_ID}/expenses/exp-seeded`);
+    const ownerSeededRef = ownerDb.doc(`groups/${GROUP_ID}/expenses/exp-seeded`);
+
+    await assertSucceeds(seededRef.set({ note: "Admin sua" }, { merge: true }));
+    await assertFails(seededRef.delete());
+
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      const db = context.firestore();
+      await db.doc(`groups/${GROUP_ID}/expenses/exp-owner-del`).set({
+        date: "2026-03-16",
+        amount: 50000,
+        payerId: "owner",
+        participants: ["owner", "member"],
+        debts: { member: 25000 },
+        note: "Xoa duoc",
+        createdBy: OWNER_UID,
+      });
+    });
+
+    await assertSucceeds(ownerDb.doc(`groups/${GROUP_ID}/expenses/exp-owner-del`).delete());
+    await assertSucceeds(ownerSeededRef.set({ note: "Owner sua" }, { merge: true }));
+  });
+
   it("blocks invalid expense creates and locked-period writes", async () => {
     const memberDb = authenticatedDb(MEMBER_UID);
     const adminDb = authenticatedDb(ADMIN_UID);

@@ -2,8 +2,15 @@ import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { shiftPeriod } from "../core/period";
 import { isOwnerProfile } from "../core/roles";
+import { resolveMemberIdFromEmail } from "../config/members.map";
 import { logout } from "../services/auth.service";
+import { updateOwnAvatar } from "../services/member.service";
 import { NotificationBell } from "../features/notifications/NotificationBell";
+import { AvatarPicker } from "../shared/ui/AvatarPicker";
+import { BottomSheet } from "../shared/ui/BottomSheet";
+import { BrandLogo } from "../shared/ui/BrandLogo";
+import { MemberAvatar } from "../shared/ui/MemberAvatar";
+import { useToast } from "../shared/ui/Toast";
 import { useSession } from "./SessionContext";
 
 const NAV_ITEMS = [
@@ -22,10 +29,16 @@ const NAV_ITEMS = [
   {
     id: "payments",
     to: "/payments",
-    label: "Cấn trừ",
+    label: "Thanh toán",
     icon: (
       <path d="m7 16-4 4 4 4M3 20h14a4 4 0 0 0 0-8h-2m6-8-4-4-4 4M21 4H7a4 4 0 1 0 0 8h2" />
     ),
+  },
+  {
+    id: "reports",
+    to: "/reports",
+    label: "Báo cáo",
+    icon: <path d="M4 19V5M4 19h16M8 17V10M12 17V7M16 17v-4" />,
   },
   {
     id: "rent",
@@ -41,13 +54,6 @@ function formatPeriodLabel(period: string): string {
   return `Tháng ${Number(month)}/${year}`;
 }
 
-function getInitials(label: string): string {
-  const parts = label.trim().split(/\s+/).filter(Boolean);
-  if (!parts.length) return "?";
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return `${parts[0][0] || ""}${parts[parts.length - 1][0] || ""}`.toUpperCase();
-}
-
 function currentUserLabel(session: ReturnType<typeof useSession>): string {
   const displayName = session.memberProfile?.displayName || session.user?.displayName || "";
   const email = session.memberProfile?.email || session.user?.email || "";
@@ -57,7 +63,10 @@ function currentUserLabel(session: ReturnType<typeof useSession>): string {
 export function AppShell() {
   const session = useSession();
   const navigate = useNavigate();
+  const { showToast } = useToast();
   const [profileOpen, setProfileOpen] = useState(false);
+  const [avatarOpen, setAvatarOpen] = useState(false);
+  const [avatarSaving, setAvatarSaving] = useState(false);
   const profileRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -75,18 +84,44 @@ export function AppShell() {
 
   const label = currentUserLabel(session);
   const owner = isOwnerProfile(session.memberProfile);
+  const myMemberId =
+    session.memberProfile?.memberId ||
+    resolveMemberIdFromEmail(session.user?.email) ||
+    "";
+  const myPhotoURL = String(session.memberProfile?.photoURL || "");
 
   async function handleLogout() {
     setProfileOpen(false);
     await logout();
   }
 
+  async function handleSelectAvatar(petId: string) {
+    if (!session.groupId || !session.user?.uid) return;
+    setAvatarSaving(true);
+    try {
+      await updateOwnAvatar(session.groupId, session.user.uid, petId);
+      showToast({
+        title: "Đã đổi avatar",
+        message: "Avatar thú cưng của bạn đã được cập nhật.",
+        variant: "success",
+      });
+      setAvatarOpen(false);
+    } catch (error) {
+      showToast({
+        title: "Không đổi được",
+        message: (error as { message?: string })?.message || "Thử lại sau.",
+        variant: "danger",
+      });
+    } finally {
+      setAvatarSaving(false);
+    }
+  }
+
   return (
     <div className="app-shell">
       <header className="app-header">
-        <NavLink to="/dashboard" className="app-header__brand" aria-label="Split Room">
-          <span className="app-header__brand-dot" aria-hidden="true" />
-          <span className="app-header__brand-text">Split Room</span>
+        <NavLink to="/dashboard" className="app-header__brand" aria-label="SplitRoom">
+          <BrandLogo size={36} className="app-header__brand-logo" decorative />
         </NavLink>
 
         <div className="app-header__period">
@@ -122,15 +157,26 @@ export function AppShell() {
               aria-expanded={profileOpen}
               onClick={() => setProfileOpen((current) => !current)}
             >
-              {session.user?.photoURL ? (
-                <img src={session.user.photoURL} alt="" />
-              ) : (
-                getInitials(label)
-              )}
+              <MemberAvatar
+                memberId={myMemberId}
+                photoURL={myPhotoURL}
+                label={label}
+                size={36}
+              />
             </button>
             {profileOpen ? (
               <div className="profile-menu__panel">
                 <div className="profile-menu__name">{label}</div>
+                <button
+                  type="button"
+                  className="profile-menu__item"
+                  onClick={() => {
+                    setProfileOpen(false);
+                    setAvatarOpen(true);
+                  }}
+                >
+                  Đổi avatar thú cưng
+                </button>
                 {owner ? (
                   <button
                     type="button"
@@ -187,6 +233,24 @@ export function AppShell() {
           ))}
         </div>
       </nav>
+
+      <BottomSheet
+        open={avatarOpen}
+        onClose={() => {
+          if (!avatarSaving) setAvatarOpen(false);
+        }}
+        title="Chọn avatar thú cưng"
+      >
+        <p className="form-hint" style={{ marginBottom: 12 }}>
+          Chọn một thú cưng làm ảnh đại diện. Bạn có thể đổi bất cứ lúc nào.
+        </p>
+        <AvatarPicker
+          selectedSrc={myPhotoURL}
+          memberId={myMemberId}
+          disabled={avatarSaving}
+          onSelect={(petId) => void handleSelectAvatar(petId)}
+        />
+      </BottomSheet>
     </div>
   );
 }

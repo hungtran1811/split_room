@@ -52,6 +52,26 @@ export function canAddExpense(
   return role === "owner" || role === "admin" || role === "member";
 }
 
+export function canEditExpense(profile: MemberProfile | null | undefined): boolean {
+  return canOperateMonth(profile);
+}
+
+export function canDeleteExpense(profile: MemberProfile | null | undefined): boolean {
+  return isOwnerProfile(profile);
+}
+
+export function canRecordPayment(profile: MemberProfile | null | undefined): boolean {
+  return canOperateMonth(profile);
+}
+
+export function canEditRent(profile: MemberProfile | null | undefined): boolean {
+  return canOperateMonth(profile);
+}
+
+export function canViewFullSettlement(profile: MemberProfile | null | undefined): boolean {
+  return canOperateMonth(profile);
+}
+
 export function isAdminProfile(profile: MemberProfile | null | undefined): boolean {
   return canOperateMonth(profile);
 }

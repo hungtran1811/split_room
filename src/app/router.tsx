@@ -1,4 +1,3 @@
-import type { ReactNode } from "react";
 import { HashRouter, Navigate, Outlet, Route, Routes } from "react-router-dom";
 import { firebaseConfigured } from "../config/firebase";
 import { AdminPage } from "../pages/AdminPage";
@@ -7,27 +6,17 @@ import { ExpensesPage } from "../pages/ExpensesPage";
 import { LoginPage } from "../pages/LoginPage";
 import { PaymentsPage } from "../pages/PaymentsPage";
 import { RentPage } from "../pages/RentPage";
+import { ReportsPage } from "../pages/ReportsPage";
+import { BootLoading } from "../shared/ui/BootLoading";
 import { AppShell } from "./AppShell";
 import { useSession } from "./SessionContext";
-
-function BootScreen({ title, subtitle, children }: { title: string; subtitle: string; children?: ReactNode }) {
-  return (
-    <div className="boot-screen">
-      <div className="app-boot__card">
-        <h1>{title}</h1>
-        <p>{subtitle}</p>
-        {children ? <div className="app-boot__actions">{children}</div> : null}
-      </div>
-    </div>
-  );
-}
 
 function AuthGate() {
   const { bootStatus, errorMessage } = useSession();
 
   if (!firebaseConfigured || bootStatus === "needs-config") {
     return (
-      <BootScreen
+      <BootLoading
         title="Chưa cấu hình Firebase"
         subtitle="Thiếu VITE_FB_API_KEY hoặc VITE_FB_PROJECT_ID. Sao chép .env.example thành .env.local, điền cấu hình Firebase, rồi chạy lại ứng dụng."
       />
@@ -36,11 +25,11 @@ function AuthGate() {
 
   if (bootStatus === "error") {
     return (
-      <BootScreen title="Không thể tải dữ liệu" subtitle={errorMessage || "Đã xảy ra lỗi không xác định."}>
+      <BootLoading title="Không thể tải dữ liệu" subtitle={errorMessage || "Đã xảy ra lỗi không xác định."}>
         <button type="button" className="btn btn--primary btn--sm" onClick={() => window.location.reload()}>
           Thử lại
         </button>
-      </BootScreen>
+      </BootLoading>
     );
   }
 
@@ -49,7 +38,7 @@ function AuthGate() {
   }
 
   if (bootStatus !== "ready") {
-    return <BootScreen title="Đang tải..." subtitle="Vui lòng chờ trong giây lát." />;
+    return <BootLoading loading title="SplitRoom" />;
   }
 
   return <Outlet />;
@@ -60,6 +49,10 @@ function LoginRoute() {
 
   if (bootStatus === "ready") {
     return <Navigate to="/dashboard" replace />;
+  }
+
+  if (bootStatus === "loading") {
+    return <BootLoading loading title="SplitRoom" />;
   }
 
   return <LoginPage />;
@@ -76,6 +69,7 @@ export function AppRouter() {
             <Route path="dashboard" element={<DashboardPage />} />
             <Route path="expenses" element={<ExpensesPage />} />
             <Route path="payments" element={<PaymentsPage />} />
+            <Route path="reports" element={<ReportsPage />} />
             <Route path="rent" element={<RentPage />} />
             <Route path="admin" element={<AdminPage />} />
           </Route>
