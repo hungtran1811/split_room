@@ -6,6 +6,12 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     globals: false,
+    exclude: [
+      "**/node_modules/**",
+      "**/dist/**",
+      "tests/firestore.rules.test.js",
+      "functions/**",
+    ],
   },
   build: {
     rollupOptions: {
