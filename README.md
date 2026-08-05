@@ -3,6 +3,7 @@
 Ứng dụng web chia bill phòng trọ cho nhóm P102.
 
 **Stack:** Vite + React 19 + TypeScript + Firebase Auth + Firestore + PWA.  
+**UI:** Sora + teal “Ledger Clear” — [docs/UI_SYSTEM.md](docs/UI_SYSTEM.md)  
 **Production:** [splitfam.netlify.app](https://splitfam.netlify.app)
 
 Kiến trúc ngắn: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)

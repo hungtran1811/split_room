@@ -3,6 +3,7 @@ import { formatVND } from "../shared/lib/format";
 import { Button } from "../shared/ui/Button";
 import { BottomSheet } from "../shared/ui/BottomSheet";
 import { EmptyState } from "../shared/ui/EmptyState";
+import { LockBanner, PageHeader, RowAction } from "../shared/ui/PageHeader";
 import { MetricGrid } from "../shared/ui/MetricTile";
 import { SkeletonList } from "../shared/ui/Skeleton";
 import { useToast } from "../shared/ui/Toast";
@@ -94,6 +95,7 @@ export function ExpensesPage() {
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState("");
   const [dateFilter, setDateFilter] = useState("");
+  const [showDetails, setShowDetails] = useState(false);
 
   const expenses = live.expenses as ExpenseDoc[];
 
@@ -131,6 +133,7 @@ export function ExpensesPage() {
     setEditingId(null);
     setForm(buildEmptyForm(session.selectedPeriod, myMemberId));
     setFormError("");
+    setShowDetails(false);
     setSheetOpen(true);
   }
 
@@ -153,6 +156,7 @@ export function ExpensesPage() {
       ),
     });
     setFormError("");
+    setShowDetails(true);
     setSheetOpen(true);
   }
 
@@ -246,10 +250,7 @@ export function ExpensesPage() {
 
   return (
     <div className="expenses-page">
-      <div className="page-head">
-        <h1 className="page-head__title">Chi tiêu</h1>
-        <p className="page-head__subtitle">Tháng {session.selectedPeriod}</p>
-      </div>
+      <PageHeader title="Chi tiêu" subtitle={`Tháng ${session.selectedPeriod}`} />
 
       <MetricGrid
         columns={2}
@@ -264,11 +265,11 @@ export function ExpensesPage() {
       />
 
       {!canAddNow ? (
-        <div className={`readonly-banner ${canAdd ? "readonly-banner--info" : ""}`}>
+        <LockBanner variant={canAdd ? "info" : "warning"}>
           {session.lockedSoft
             ? "Tháng này đã được chốt — không thể thêm chi tiêu."
             : "Tài khoản chưa được gán thành viên — không thể thêm chi tiêu."}
-        </div>
+        </LockBanner>
       ) : null}
 
       <div className="expense-filter-row">
@@ -291,7 +292,7 @@ export function ExpensesPage() {
             Bỏ lọc
           </Button>
         ) : null}
-        <div style={{ flex: 1 }} />
+        <div className="expense-filter-row__spacer" />
         {canAddNow ? (
           <Button variant="primary" onClick={openCreateSheet}>
             + Thêm khoản chi
@@ -305,10 +306,17 @@ export function ExpensesPage() {
         <EmptyState
           title={dateFilter ? "Không có khoản chi trong ngày này" : "Chưa có khoản chi trong tháng"}
           description="Bấm “Thêm khoản chi” để ghi nhận khoản chi mới."
+          action={
+            canAddNow ? (
+              <Button variant="primary" onClick={openCreateSheet}>
+                + Thêm
+              </Button>
+            ) : undefined
+          }
         />
       ) : (
         groupedByDate.map(([date, items]) => (
-          <section key={date}>
+          <section key={date} className="expense-day-group">
             <div className="expense-day-group__header">
               {date} • {items.length} khoản
             </div>
@@ -335,16 +343,12 @@ export function ExpensesPage() {
                       )}
                     </div>
                   </div>
-                  <div style={{ textAlign: "right" }}>
+                  <div className="list-row__amount-col">
                     <div className="list-row__amount">{formatVND(expense.amount)}</div>
                     {canManage ? (
-                      <div className="list-row__actions" style={{ marginTop: 8 }}>
-                        <button type="button" className="btn btn--ghost btn--sm" onClick={() => openEditSheet(expense)}>
-                          Sửa
-                        </button>
-                        <button type="button" className="btn btn--danger btn--sm" onClick={() => void handleDelete(expense)}>
-                          Xóa
-                        </button>
+                      <div className="list-row__actions">
+                        <RowAction label="Sửa" onClick={() => openEditSheet(expense)} />
+                        <RowAction label="Xóa" variant="danger" onClick={() => void handleDelete(expense)} />
                       </div>
                     ) : null}
                   </div>
@@ -373,7 +377,7 @@ export function ExpensesPage() {
               value={form.amount}
               onChange={(event) => setForm((current) => ({ ...current, amount: event.target.value }))}
             />
-            <div className="chip-row" style={{ marginTop: 6 }}>
+            <div className="chip-row">
               {AMOUNT_PRESETS.map((preset) => (
                 <button
                   key={preset}
@@ -384,40 +388,6 @@ export function ExpensesPage() {
                   {formatPresetLabel(preset)}
                 </button>
               ))}
-            </div>
-          </div>
-
-          <div className="form-grid form-grid--2">
-            <div className="form-field">
-              <label className="form-label" htmlFor="exDate">
-                Ngày
-              </label>
-              <input
-                id="exDate"
-                type="date"
-                className="form-input"
-                value={form.date}
-                min={getMonthRange(session.selectedPeriod).start}
-                max={lastDayOfPeriod(session.selectedPeriod)}
-                onChange={(event) => setForm((current) => ({ ...current, date: event.target.value }))}
-              />
-            </div>
-            <div className="form-field">
-              <label className="form-label" htmlFor="exPayer">
-                Người trả
-              </label>
-              <select
-                id="exPayer"
-                className="form-select"
-                value={form.payerId}
-                onChange={(event) => setForm((current) => ({ ...current, payerId: event.target.value }))}
-              >
-                {ROSTER.map((member) => (
-                  <option key={member.id} value={member.id}>
-                    {member.name}
-                  </option>
-                ))}
-              </select>
             </div>
           </div>
 
@@ -433,7 +403,7 @@ export function ExpensesPage() {
               onChange={(event) => setForm((current) => ({ ...current, note: event.target.value }))}
             />
             {noteSuggestions.length ? (
-              <div className="chip-row" style={{ marginTop: 6 }}>
+              <div className="chip-row">
                 {noteSuggestions.map((note) => (
                   <button
                     key={note}
@@ -448,59 +418,103 @@ export function ExpensesPage() {
             ) : null}
           </div>
 
-          <div className="form-field">
-            <div className="form-switch-row">
-              <span>Người tham gia</span>
-              <label className="form-switch-row">
-                <input
-                  type="checkbox"
-                  checked={form.equalSplit}
-                  onChange={(event) => setForm((current) => ({ ...current, equalSplit: event.target.checked }))}
-                />
-                Chia đều
-              </label>
+          {!showDetails ? (
+            <div className="expense-details-toggle">
+              <Button variant="ghost" onClick={() => setShowDetails(true)}>
+                Chi tiết người tham gia
+              </Button>
             </div>
-            <div className="chip-row">
-              {ROSTER.map((member) => (
-                <label
-                  key={member.id}
-                  className={`chip-toggle ${form.participants.includes(member.id) ? "is-active" : ""}`.trim()}
-                >
+          ) : (
+            <>
+              <div className="form-grid form-grid--2">
+                <div className="form-field">
+                  <label className="form-label" htmlFor="exDate">
+                    Ngày
+                  </label>
                   <input
-                    type="checkbox"
-                    checked={form.participants.includes(member.id)}
-                    onChange={() => toggleParticipant(member.id)}
+                    id="exDate"
+                    type="date"
+                    className="form-input"
+                    value={form.date}
+                    min={getMonthRange(session.selectedPeriod).start}
+                    max={lastDayOfPeriod(session.selectedPeriod)}
+                    onChange={(event) => setForm((current) => ({ ...current, date: event.target.value }))}
                   />
-                  <span>{member.name}</span>
-                </label>
-              ))}
-            </div>
-          </div>
-
-          {!form.equalSplit ? (
-            <div className="form-field">
-              <span className="form-label">Phân bổ nợ thủ công</span>
-              <div className="debts-grid">
-                {ROSTER_IDS.filter((id) => id !== form.payerId && form.participants.includes(id)).map((memberId) => (
-                  <div key={memberId} className="debt-input-row">
-                    <label className="form-hint">
-                      {nameOf(memberId)} nợ {nameOf(form.payerId)}
-                    </label>
-                    <input
-                      className="form-input"
-                      value={form.manualDebts[memberId] || ""}
-                      onChange={(event) =>
-                        setForm((current) => ({
-                          ...current,
-                          manualDebts: { ...current.manualDebts, [memberId]: event.target.value },
-                        }))
-                      }
-                    />
-                  </div>
-                ))}
+                </div>
+                <div className="form-field">
+                  <label className="form-label" htmlFor="exPayer">
+                    Người trả
+                  </label>
+                  <select
+                    id="exPayer"
+                    className="form-select"
+                    value={form.payerId}
+                    onChange={(event) => setForm((current) => ({ ...current, payerId: event.target.value }))}
+                  >
+                    {ROSTER.map((member) => (
+                      <option key={member.id} value={member.id}>
+                        {member.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
-            </div>
-          ) : null}
+
+              <div className="form-field">
+                <div className="form-switch-row">
+                  <span>Người tham gia</span>
+                  <label className="form-switch-row">
+                    <input
+                      type="checkbox"
+                      checked={form.equalSplit}
+                      onChange={(event) => setForm((current) => ({ ...current, equalSplit: event.target.checked }))}
+                    />
+                    Chia đều
+                  </label>
+                </div>
+                <div className="chip-row">
+                  {ROSTER.map((member) => (
+                    <label
+                      key={member.id}
+                      className={`chip-toggle ${form.participants.includes(member.id) ? "is-active" : ""}`.trim()}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={form.participants.includes(member.id)}
+                        onChange={() => toggleParticipant(member.id)}
+                      />
+                      <span>{member.name}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {!form.equalSplit ? (
+                <div className="form-field">
+                  <span className="form-label">Phân bổ nợ thủ công</span>
+                  <div className="debts-grid">
+                    {ROSTER_IDS.filter((id) => id !== form.payerId && form.participants.includes(id)).map((memberId) => (
+                      <div key={memberId} className="debt-input-row">
+                        <label className="form-hint">
+                          {nameOf(memberId)} nợ {nameOf(form.payerId)}
+                        </label>
+                        <input
+                          className="form-input"
+                          value={form.manualDebts[memberId] || ""}
+                          onChange={(event) =>
+                            setForm((current) => ({
+                              ...current,
+                              manualDebts: { ...current.manualDebts, [memberId]: event.target.value },
+                            }))
+                          }
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </>
+          )}
 
           <div className="expense-summary-strip">
             <div className="expense-summary-strip__item">

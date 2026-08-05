@@ -11,9 +11,7 @@ const NAV_ITEMS = [
     id: "dashboard",
     to: "/dashboard",
     label: "Tổng quan",
-    icon: (
-      <path d="M3 10.5 12 3l9 7.5M5 9.5V20h14V9.5M10 20v-6h4v6" />
-    ),
+    icon: <path d="M3 10.5 12 3l9 7.5M5 9.5V20h14V9.5M10 20v-6h4v6" />,
   },
   {
     id: "expenses",
@@ -25,7 +23,9 @@ const NAV_ITEMS = [
     id: "payments",
     to: "/payments",
     label: "Cấn trừ",
-    icon: <path d="m7 16-4 4 4 4M3 20h14a4 4 0 0 0 0-8h-2m6-8-4-4-4 4M21 4H7a4 4 0 1 0 0 8h2" />,
+    icon: (
+      <path d="m7 16-4 4 4 4M3 20h14a4 4 0 0 0 0-8h-2m6-8-4-4-4 4M21 4H7a4 4 0 1 0 0 8h2" />
+    ),
   },
   {
     id: "rent",
@@ -84,8 +84,9 @@ export function AppShell() {
   return (
     <div className="app-shell">
       <header className="app-header">
-        <NavLink to="/dashboard" className="app-header__brand">
-          Split Room
+        <NavLink to="/dashboard" className="app-header__brand" aria-label="Split Room">
+          <span className="app-header__brand-dot" aria-hidden="true" />
+          <span className="app-header__brand-text">Split Room</span>
         </NavLink>
 
         <div className="app-header__period">
@@ -118,6 +119,7 @@ export function AppShell() {
               type="button"
               className="profile-menu__trigger"
               aria-label="Menu tài khoản"
+              aria-expanded={profileOpen}
               onClick={() => setProfileOpen((current) => !current)}
             >
               {session.user?.photoURL ? (
@@ -132,13 +134,13 @@ export function AppShell() {
                 {owner ? (
                   <button
                     type="button"
-                    className="profile-menu__item"
+                    className="profile-menu__item profile-menu__item--admin"
                     onClick={() => {
                       setProfileOpen(false);
                       navigate("/admin");
                     }}
                   >
-                    Quản trị
+                    Quản trị nhóm
                   </button>
                 ) : null}
                 <button
@@ -164,7 +166,9 @@ export function AppShell() {
             <NavLink
               key={item.id}
               to={item.to}
-              className={({ isActive }) => `bottom-nav__item ${isActive ? "is-active" : ""}`.trim()}
+              className={({ isActive }) =>
+                `bottom-nav__item ${isActive ? "is-active" : ""}`.trim()
+              }
             >
               <svg
                 className="bottom-nav__icon"
@@ -174,6 +178,7 @@ export function AppShell() {
                 strokeWidth="2"
                 strokeLinecap="round"
                 strokeLinejoin="round"
+                aria-hidden="true"
               >
                 {item.icon}
               </svg>

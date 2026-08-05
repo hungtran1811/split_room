@@ -55,7 +55,7 @@ src/
   domain/        # pure TS: whole-vnd, matrix, rent, month-close
   services/      # Firebase only
   hooks/         # useAuth, useLiveMonth, usePeriod, …
-  styles/        # tokens + shell (Exo 2, blue-indigo)
+  styles/        # tokens + shell (Sora + teal “Ledger Clear” — xem docs/UI_SYSTEM.md)
   config/        # GROUP_ID, roster, firebase env
 ```
 

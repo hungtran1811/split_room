@@ -1,63 +1,128 @@
 .login-page {
   min-height: 100vh;
-  display: grid;
-  place-items: center;
-  padding: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  padding: var(--space-6) var(--space-5) calc(var(--space-7) + var(--safe-bottom));
+  position: relative;
+  overflow: hidden;
+}
+
+.login-page::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(165deg, rgba(15, 118, 110, 0.18) 0%, transparent 45%),
+    linear-gradient(0deg, var(--surface-0) 35%, transparent 70%),
+    var(--dot-grid);
+  background-size: auto, auto, 18px 18px;
+  z-index: 0;
+}
+
+.login-hero {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  max-width: 420px;
+  width: 100%;
+  margin: 0 auto;
+  padding-bottom: var(--space-6);
+}
+
+.login-hero__mark {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 6px var(--accent-soft);
+  margin-bottom: var(--space-5);
+}
+
+.login-hero__brand {
+  margin: 0;
+  font-size: clamp(2.4rem, 10vw, 3.4rem);
+  font-weight: 700;
+  letter-spacing: -0.04em;
+  line-height: 1.05;
+  color: var(--ink);
+}
+
+.login-hero__subtitle {
+  margin: var(--space-4) 0 0;
+  max-width: 22rem;
+  font-size: var(--text-base);
+  line-height: 1.55;
+  color: var(--ink-muted);
+}
+
+.login-actions {
+  position: relative;
+  z-index: 1;
+  max-width: 420px;
+  width: 100%;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.login-card__google {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: 52px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--accent);
+  color: #fff;
+  font-weight: 700;
+  font-size: var(--text-base);
+  box-shadow: var(--elev-1);
+}
+
+.login-card__google:hover:not(:disabled) {
+  filter: brightness(1.05);
+}
+
+.login-card__google:disabled {
+  opacity: 0.65;
+}
+
+.login-card__message {
+  min-height: 1.25rem;
+  text-align: center;
+  font-size: var(--text-sm);
+  color: var(--danger);
+  font-weight: 600;
 }
 
 .login-card {
-  width: 100%;
-  max-width: 400px;
+  position: relative;
+  z-index: 1;
+  max-width: 420px;
+  margin: auto;
   background: var(--surface-1);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  box-shadow: var(--elev-2);
   padding: var(--space-6);
-  text-align: center;
+  box-shadow: var(--elev-1);
 }
 
 .login-card__brand {
   font-size: var(--text-2xl);
-  font-weight: 800;
-  color: var(--accent);
-  margin-bottom: var(--space-2);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  margin-bottom: var(--space-3);
 }
 
 .login-card__subtitle {
+  margin: 0 0 var(--space-5);
   color: var(--ink-muted);
-  font-size: var(--text-sm);
-  margin-bottom: var(--space-6);
   line-height: 1.5;
-}
-
-.login-card__google {
-  width: 100%;
-  height: 48px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border-strong);
-  background: var(--surface-1);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-2);
-  font-weight: 700;
-  font-size: var(--text-base);
-  color: var(--ink);
-  transition: box-shadow var(--motion-fast);
-}
-
-.login-card__google:hover:not(:disabled) {
-  box-shadow: var(--elev-1);
-}
-
-.login-card__google:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.login-card__message {
-  margin-top: var(--space-4);
-  font-size: var(--text-sm);
-  color: var(--danger);
-  min-height: 20px;
 }

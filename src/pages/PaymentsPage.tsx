@@ -1,8 +1,10 @@
 import { useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { formatVND } from "../shared/lib/format";
 import { Button } from "../shared/ui/Button";
 import { BottomSheet } from "../shared/ui/BottomSheet";
 import { EmptyState } from "../shared/ui/EmptyState";
+import { LockBanner, PageHeader, RowAction } from "../shared/ui/PageHeader";
 import { SegmentedTabs, type SegmentedTab } from "../shared/ui/SegmentedTabs";
 import { SkeletonList } from "../shared/ui/Skeleton";
 import { useToast } from "../shared/ui/Toast";
@@ -70,6 +72,7 @@ function emptyPaySheet(): PaySheetState {
 
 export function PaymentsPage() {
   const session = useSession();
+  const navigate = useNavigate();
   const { showToast } = useToast();
   const live = useLiveMonth("payments", session.groupId, session.selectedPeriod);
   const [activeTab, setActiveTab] = useState("suggest");
@@ -222,14 +225,15 @@ export function PaymentsPage() {
 
   return (
     <div className="payments-page">
-      <div className="page-head">
-        <h1 className="page-head__title">Cấn trừ</h1>
-        <p className="page-head__subtitle">Tháng {session.selectedPeriod}</p>
-      </div>
+      <PageHeader title="Cấn trừ" subtitle={`Tháng ${session.selectedPeriod}`} />
 
       <SegmentedTabs tabs={TABS} value={activeTab} onChange={setActiveTab} ariaLabel="Chuyển tab cấn trừ" />
 
-      <div style={{ marginTop: 16 }}>
+      {session.lockedSoft ? (
+        <LockBanner>Tháng {session.selectedPeriod} đã chốt — không thể ghi nhận thanh toán mới.</LockBanner>
+      ) : null}
+
+      <div className="payments-page__body">
         {!ready ? (
           <SkeletonList count={3} />
         ) : activeTab === "suggest" ? (
@@ -239,7 +243,19 @@ export function PaymentsPage() {
               {frozenSettlementPlan ? <span className="status-badge status-badge--pending">Đã chốt</span> : null}
             </div>
             {!orderedSettlement.length ? (
-              <EmptyState title="Đã cân bằng" description="Không còn khoản cấn trừ nào trong tháng này." />
+              <EmptyState
+                title={expenses.length ? "Đã cân bằng" : "Chưa có chi tiêu"}
+                description={
+                  expenses.length
+                    ? "Không còn khoản cấn trừ nào trong tháng này."
+                    : "Thêm chi tiêu trước để hệ thống gợi ý cấn trừ."
+                }
+                action={
+                  <Button variant="primary" onClick={() => navigate("/expenses")}>
+                    {expenses.length ? "Xem chi tiêu" : "Thêm chi tiêu"}
+                  </Button>
+                }
+              />
             ) : (
               <div className="stack-list">
                 {orderedSettlement.map((item, index) => {
@@ -255,12 +271,8 @@ export function PaymentsPage() {
                       <div className="list-row__amount">{formatVND(item.amount)}</div>
                       {canOperate ? (
                         <div className="list-row__actions">
-                          <button type="button" className="btn btn--primary btn--sm" onClick={() => openPaySheet(item, true)}>
-                            Đủ
-                          </button>
-                          <button type="button" className="btn btn--ghost btn--sm" onClick={() => openPaySheet(item, false)}>
-                            Một phần
-                          </button>
+                          <RowAction label="Đủ" variant="primary" onClick={() => openPaySheet(item, true)} />
+                          <RowAction label="Một phần" onClick={() => openPaySheet(item, false)} />
                         </div>
                       ) : null}
                     </article>
@@ -273,7 +285,10 @@ export function PaymentsPage() {
           <section className="card">
             <h2 className="card__title">Lịch sử thanh toán tháng này</h2>
             {!sortedPayments.length ? (
-              <EmptyState title="Chưa có giao dịch" />
+              <EmptyState
+                title="Chưa có giao dịch"
+                description="Ghi nhận thanh toán từ tab Gợi ý hoặc sau khi có chi tiêu trong tháng."
+              />
             ) : (
               <div className="stack-list">
                 {sortedPayments.map((payment) => (
@@ -290,12 +305,8 @@ export function PaymentsPage() {
                     <div className="list-row__amount">{formatVND(payment.amount)}</div>
                     {canOperate ? (
                       <div className="list-row__actions">
-                        <button type="button" className="btn btn--ghost btn--sm" onClick={() => openEditPayment(payment)}>
-                          Sửa
-                        </button>
-                        <button type="button" className="btn btn--danger btn--sm" onClick={() => void handleDeletePayment(payment)}>
-                          Xóa
-                        </button>
+                        <RowAction label="Sửa" onClick={() => openEditPayment(payment)} />
+                        <RowAction label="Xóa" variant="danger" onClick={() => void handleDeletePayment(payment)} />
                       </div>
                     ) : null}
                   </article>
@@ -350,6 +361,7 @@ export function PaymentsPage() {
                   </tbody>
                 </table>
               </div>
+              <p className="matrix-legend">Hàng = con nợ · Cột = chủ nợ</p>
             </section>
 
             <section className="card">

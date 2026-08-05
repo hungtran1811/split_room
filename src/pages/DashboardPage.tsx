@@ -1,9 +1,12 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { formatVND } from "../shared/lib/format";
+import { Button } from "../shared/ui/Button";
+import { EmptyState } from "../shared/ui/EmptyState";
 import { MetricGrid } from "../shared/ui/MetricTile";
 import { SkeletonList, SkeletonStatGrid } from "../shared/ui/Skeleton";
 import { useToast } from "../shared/ui/Toast";
+import { LockBanner } from "../shared/ui/PageHeader";
 import { useSession } from "../app/SessionContext";
 import { useLiveMonth } from "../hooks/useLiveMonth";
 import { ROSTER, ROSTER_IDS } from "../config/roster";
@@ -150,9 +153,15 @@ export function DashboardPage() {
 
   return (
     <div className="dashboard-page">
+      {session.lockedSoft ? (
+        <LockBanner>Tháng {session.selectedPeriod} đã chốt — số liệu dùng snapshot, không ghi mới.</LockBanner>
+      ) : null}
+
       <section className={`balance-card balance-card--${personalDebt.status}`}>
         <div className="balance-card__top">
-          <span className="balance-card__label">Còn phải trả</span>
+          <span className="balance-card__label">
+            {personalDebt.total > 0 ? "Bạn còn phải trả" : "Tình trạng tháng này"}
+          </span>
           <span className="balance-card__badge">{personalDebt.statusLabel}</span>
         </div>
         <div className="balance-card__amount">{formatVND(personalDebt.total)}</div>
@@ -164,16 +173,22 @@ export function DashboardPage() {
               </span>
             ))}
           </div>
-        ) : null}
+        ) : (
+          <p className="balance-card__hint">
+            {personalDebt.status === "pending"
+              ? "Chưa có tiền nhà — nhập ở tab Nhà khi sẵn sàng."
+              : "Không còn khoản phải trả trong tháng này."}
+          </p>
+        )}
         <div className="balance-card__actions">
           {personalDebt.total > 0 ? (
-            <button type="button" className="btn btn--primary" onClick={() => navigate("/payments?tab=suggest")}>
+            <Button variant="primary" onClick={() => navigate("/payments?tab=suggest")}>
               Cấn trừ ngay
-            </button>
+            </Button>
           ) : (
-            <button type="button" className="btn btn--primary" onClick={() => navigate("/expenses")}>
+            <Button variant="primary" onClick={() => navigate("/expenses")}>
               Ghi chi tiêu
-            </button>
+            </Button>
           )}
         </div>
       </section>
@@ -182,37 +197,44 @@ export function DashboardPage() {
         columns={4}
         tiles={[
           { label: "Chi", value: formatVND(expenseTotal) },
-          { label: "Đã trả", value: formatVND(paymentTotal), tone: paymentTotal > 0 ? "positive" : "neutral" },
-          { label: "Nhà", value: formatVND(rentTotal), tone: rentTotal > 0 ? "warning" : "neutral" },
           {
-            label: "Cấn trừ",
+            label: "Đã trả",
+            value: formatVND(paymentTotal),
+            tone: paymentTotal > 0 ? "positive" : "neutral",
+          },
+          {
+            label: "Nhà",
+            value: formatVND(rentTotal),
+            tone: rentTotal > 0 ? "warning" : "neutral",
+          },
+          {
+            label: "Gợi ý",
             value: settlement.settlementPlan.length || 0,
             tone: settlement.settlementPlan.length ? "danger" : "positive",
           },
         ]}
       />
 
-      <div className="dash-cta-row">
-        <button type="button" className="btn btn--ghost" onClick={() => navigate("/expenses")}>
-          Chi tiêu
-        </button>
-        <button type="button" className="btn btn--ghost" onClick={() => navigate("/payments")}>
-          Cấn trừ
-        </button>
-        <button type="button" className="btn btn--ghost" onClick={() => navigate("/rent")}>
-          Tiền nhà
-        </button>
-      </div>
-
       <section className="card">
         <div className="card__head">
-          <h2 className="card__title">Tiền nhà tháng này</h2>
-          <button type="button" className="btn btn--ghost btn--sm" onClick={() => navigate("/rent")}>
-            Mở
-          </button>
+          <div>
+            <h2 className="card__title">Tiền nhà</h2>
+            <p className="card__subtitle">Tháng {session.selectedPeriod}</p>
+          </div>
+          <Button variant="ghost" className="btn--sm" onClick={() => navigate("/rent")}>
+            Chi tiết
+          </Button>
         </div>
         {!rentSummary ? (
-          <p className="form-hint">Chưa có dữ liệu tiền nhà tháng {session.selectedPeriod}.</p>
+          <EmptyState
+            title="Chưa nhập tiền nhà"
+            description={`Điền khoản nhà cho tháng ${session.selectedPeriod} để theo dõi thu.`}
+            action={
+              <Button variant="primary" onClick={() => navigate("/rent")}>
+                Nhập tiền nhà
+              </Button>
+            }
+          />
         ) : (
           <div className="rent-panel">
             <div className="rent-panel__stats">
@@ -224,7 +246,9 @@ export function DashboardPage() {
                   </div>
                   <div className="rent-panel__stat">
                     <div className="rent-panel__stat-label">Đã thu</div>
-                    <div className="rent-panel__stat-value">{formatVND(rentSummary.collectedFromOthers)}</div>
+                    <div className="rent-panel__stat-value">
+                      {formatVND(rentSummary.collectedFromOthers)}
+                    </div>
                   </div>
                 </>
               ) : (
@@ -235,7 +259,9 @@ export function DashboardPage() {
                   </div>
                   <div className="rent-panel__stat">
                     <div className="rent-panel__stat-label">Đã trả</div>
-                    <div className="rent-panel__stat-value">{formatVND(rentSummary.alreadyPaid)}</div>
+                    <div className="rent-panel__stat-value">
+                      {formatVND(rentSummary.alreadyPaid)}
+                    </div>
                   </div>
                 </>
               )}
@@ -254,13 +280,13 @@ export function DashboardPage() {
             <div>
               <h2 className="card__title">Chốt tháng {session.selectedPeriod}</h2>
               <p className="card__subtitle">
-                Khóa mềm tháng này và lưu snapshot số dư, cấn trừ, tiền nhà hiện tại.
+                Khóa mềm và lưu snapshot số dư, cấn trừ, tiền nhà.
               </p>
             </div>
           </div>
-          <button type="button" className="btn btn--primary" disabled={closing} onClick={() => void handleCloseMonth()}>
-            {closing ? "Đang chốt..." : "Chốt tháng"}
-          </button>
+          <Button variant="ghost" disabled={closing} onClick={() => void handleCloseMonth()}>
+            {closing ? "Đang chốt…" : "Chốt tháng"}
+          </Button>
         </section>
       ) : null}
     </div>

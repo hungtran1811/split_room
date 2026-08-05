@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
+import { Button } from "../shared/ui/Button";
 import { EmptyState } from "../shared/ui/EmptyState";
+import { PageHeader } from "../shared/ui/PageHeader";
 import { SkeletonList, SkeletonStatGrid } from "../shared/ui/Skeleton";
 import { useToast } from "../shared/ui/Toast";
 import { useSession } from "../app/SessionContext";
@@ -106,10 +108,7 @@ export function AdminPage() {
 
   return (
     <div className="admin-page">
-      <div className="page-head">
-        <h1 className="page-head__title">Quản trị</h1>
-        <p className="page-head__subtitle">Quyền thành viên và sức khỏe dữ liệu nhóm</p>
-      </div>
+      <PageHeader title="Quản trị nhóm" subtitle="Quyền thành viên và sức khỏe dữ liệu nhóm" />
 
       {loading ? (
         <>
@@ -168,55 +167,56 @@ export function AdminPage() {
               </h2>
               <span className="form-hint">{actionPending ? "Đang cập nhật quyền..." : "Chỉ admin chính mới đổi được admin phụ"}</span>
             </div>
-            <div className="admin-table-wrap">
-              <table className="admin-table">
-                <thead>
-                  <tr>
-                    <th>Tên</th>
-                    <th>memberId</th>
-                    <th>Email</th>
-                    <th>Role</th>
-                    <th>Trạng thái</th>
-                    <th>Hành động</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {members.map((member) => (
-                    <tr key={String(member.uid || member.id)}>
-                      <td>{memberLabel(member)}</td>
-                      <td>{String(member.memberId || "-")}</td>
-                      <td>{String(member.email || "-")}</td>
-                      <td>
-                        <span className={`role-badge role-badge--${member.role}`}>{roleLabel(member.role)}</span>
-                      </td>
-                      <td>
-                        {member.diagnostics?.length ? (
-                          member.diagnostics.map((item) => (
-                            <span key={item.code} className="status-badge status-badge--pending" style={{ marginRight: 4 }}>
-                              {item.label}
-                            </span>
-                          ))
-                        ) : (
-                          <span className="status-badge status-badge--settled">OK</span>
-                        )}
-                      </td>
-                      <td>
-                        {member.role === "owner" ? (
-                          <span className="form-hint">Cố định</span>
-                        ) : member.role === "admin" ? (
-                          <button type="button" className="btn btn--danger btn--sm" disabled={actionPending} onClick={() => void handleDemote(member)}>
-                            Gỡ admin phụ
-                          </button>
-                        ) : (
-                          <button type="button" className="btn btn--ghost btn--sm" disabled={actionPending} onClick={() => void handlePromote(member)}>
-                            Đặt làm admin phụ
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="admin-member-list">
+              {members.map((member) => (
+                <article key={String(member.uid || member.id)} className="admin-member-card">
+                  <div className="admin-member-card__top">
+                    <div>
+                      <div className="admin-member-card__name">{memberLabel(member)}</div>
+                      <div className="admin-member-card__meta">
+                        {String(member.email || "-")}
+                        <br />
+                        memberId: {String(member.memberId || "-")}
+                      </div>
+                    </div>
+                    <span className={`role-badge role-badge--${member.role}`}>{roleLabel(member.role)}</span>
+                  </div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                    {member.diagnostics?.length ? (
+                      member.diagnostics.map((item) => (
+                        <span key={item.code} className="status-badge status-badge--pending">
+                          {item.label}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="status-badge status-badge--settled">OK</span>
+                    )}
+                  </div>
+                  <div className="admin-member-card__actions">
+                    {member.role === "owner" ? (
+                      <span className="form-hint">Cố định</span>
+                    ) : member.role === "admin" ? (
+                      <Button
+                        variant="danger"
+                        className="btn--sm"
+                        disabled={actionPending}
+                        onClick={() => void handleDemote(member)}
+                      >
+                        Gỡ admin phụ
+                      </Button>
+                    ) : (
+                      <Button
+                        variant="ghost"
+                        className="btn--sm"
+                        disabled={actionPending}
+                        onClick={() => void handlePromote(member)}
+                      >
+                        Đặt làm admin phụ
+                      </Button>
+                    )}
+                  </div>
+                </article>
+              ))}
             </div>
           </section>
         </>
