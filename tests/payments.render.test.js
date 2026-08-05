@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { lastDayOfPeriod } from "../src/core/period.js";
+import { lastDayOfPeriod } from "../src/core/period";
 import {
   buildPreviousDebtByMonth,
   defaultPaymentDateForPeriod,
   parseSettlementAction,
   settlementActionValue,
   isPaymentDateInPeriod,
-} from "../src/ui/pages/payments/render.js";
+} from "../src/features/payments/helpers";
 
 describe("payments.render settlement dates", () => {
   afterEach(() => {

@@ -1,17 +1,18 @@
 import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
 
 export default defineConfig({
+  plugins: [react()],
+  test: {
+    environment: "jsdom",
+    globals: false,
+  },
   build: {
     rollupOptions: {
       output: {
         manualChunks(id) {
           if (id.includes("node_modules/firebase")) return "firebase";
-          if (
-            id.includes("node_modules/bootstrap") ||
-            id.includes("node_modules/@popperjs")
-          ) {
-            return "bootstrap";
-          }
+          if (id.includes("node_modules/react")) return "react";
         },
       },
     },

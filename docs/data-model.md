@@ -24,7 +24,7 @@ Fields:
 - `createdAt`
 - `updatedAt`
 
-`role` is the permission source of truth and must be one of `admin` or `member`.
+`role` is the permission source of truth and must be one of `owner`, `admin`, or `member`.
 
 ## RentDoc
 
@@ -99,7 +99,7 @@ Fields may include:
 - `closedAt`
 - `closedBy`
 - `closeSource` (`manual` | `schedule`)
-- `snapshotType` (`monthly-report` | `month-close`)
+- `snapshotType` (`month-close`; legacy docs may still have `monthly-report`)
 - `stats`
 - `snapshot`
 - `rent`
@@ -107,6 +107,7 @@ Fields may include:
 
 Month-close snapshots set `lockedSoft: true` and `snapshotType: "month-close"`.
 The `snapshot` map typically holds `balances`, `settlementPlan`, `rent`, and `members`.
+There is no Reports UI or CSV export in the React app; period snapshots exist for soft-lock and settlement freeze.
 
 ## Notification
 

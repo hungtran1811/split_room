@@ -4,7 +4,7 @@ import {
   collectRecentNotes,
   findLastRepeatableExpense,
   rememberExpenseNote,
-} from "../src/ui/utils/expense-quick-entry.js";
+} from "../src/features/expenses/quickEntry";
 
 function mockLocalStorage() {
   const storage = new Map();

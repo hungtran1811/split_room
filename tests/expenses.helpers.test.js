@@ -3,7 +3,7 @@ import {
   filterExpensesByDate,
   getVisibleExpenses,
   groupExpensesByDate,
-} from "../src/ui/pages/expenses/render.js";
+} from "../src/features/expenses/helpers";
 
 describe("expenses.helpers", () => {
   const expenses = [
