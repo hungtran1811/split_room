@@ -13,7 +13,7 @@ export function BrandLogo({
 }: BrandLogoProps) {
   return (
     <img
-      src="/brand/logo.svg"
+      src="/brand/logo.png"
       alt={decorative ? "" : alt}
       width={size}
       height={size}

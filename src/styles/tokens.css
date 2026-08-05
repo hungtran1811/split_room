@@ -134,17 +134,18 @@ button {
   margin: 0 auto var(--space-4);
   border-radius: 22px;
   overflow: hidden;
-  background: #2563eb;
+  background: transparent;
   box-shadow: var(--elev-2);
 }
 
 .app-boot__logo .brand-logo {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
   display: block;
   border-radius: 0;
-  transform: scale(1.02);
+  transform: none;
+  background: transparent;
 }
 
 .app-boot__logo.is-loading {
@@ -212,9 +213,9 @@ button {
 .brand-logo {
   display: block;
   border-radius: 22%;
-  object-fit: cover;
+  object-fit: contain;
   user-select: none;
-  background: #2563eb;
+  background: transparent;
 }
 
 /* ---------- Buttons ---------- */

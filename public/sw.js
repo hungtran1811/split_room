@@ -1,9 +1,9 @@
-const CACHE = "split-room-shell-v5";
+const CACHE = "split-room-shell-v6";
 const ASSETS = [
   "/",
   "/index.html",
   "/manifest.webmanifest",
-  "/brand/logo.svg",
+  "/brand/logo.png",
 ];
 
 self.addEventListener("install", (event) => {

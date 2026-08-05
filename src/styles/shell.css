@@ -28,7 +28,7 @@
   height: 36px;
   border-radius: 10px;
   overflow: hidden;
-  background: #2563eb;
+  background: transparent;
   box-shadow: none;
   border: none;
 }
@@ -55,9 +55,8 @@
   height: 36px;
   border-radius: 0;
   display: block;
-  object-fit: cover;
-  /* Cắt mép PNG cũ nếu còn cache; SVG thì khớp nền xanh */
-  transform: scale(1.02);
+  object-fit: contain;
+  transform: none;
 }
 
 .app-header__period {
