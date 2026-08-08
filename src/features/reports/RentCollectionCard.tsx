@@ -1,6 +1,6 @@
 import { chartColorOf } from "../../config/avatars";
-import { nameOf } from "../../config/roster";
 import { formatVND } from "../../shared/lib/format";
+import { useMemberLabel } from "../../hooks/useMemberLabel";
 import { EmptyState } from "../../shared/ui/EmptyState";
 import { MemberAvatar } from "../../shared/ui/MemberAvatar";
 import type { RentCollectionInsight } from "../../domain/report/insights";
@@ -11,6 +11,7 @@ type RentCollectionCardProps = {
 };
 
 export function RentCollectionCard({ insight, myMemberId }: RentCollectionCardProps) {
+  const labelOf = useMemberLabel();
   if (!insight) {
     return (
       <EmptyState
@@ -40,7 +41,7 @@ export function RentCollectionCard({ insight, myMemberId }: RentCollectionCardPr
           <div className="rent-collection__label">Người trả nhà</div>
           <div className="rent-collection__payer">
             <MemberAvatar memberId={insight.payerId} size={28} />
-            <span>{nameOf(insight.payerId)}</span>
+            <span>{labelOf(insight.payerId)}</span>
           </div>
         </div>
       </div>
@@ -66,7 +67,7 @@ export function RentCollectionCard({ insight, myMemberId }: RentCollectionCardPr
                     className="chart-legend__swatch"
                     style={{ background: chartColorOf(row.memberId) }}
                   />
-                  {nameOf(row.memberId)}
+                  {labelOf(row.memberId)}
                   {isMe ? " (Bạn)" : ""}
                   {isPayer ? " · Người trả" : ""}
                 </div>

@@ -10,7 +10,7 @@ describe("money formatting and parsing", () => {
   });
 
   it("formats VND without decimal digits", () => {
-    expect(formatVND(39500.67)).toBe("39.501 đ");
-    expect(formatVND(1.2)).toBe("1 đ");
+    expect(formatVND(39500.67)).toBe("39.501\u00A0đ");
+    expect(formatVND(1.2)).toBe("1\u00A0đ");
   });
 });

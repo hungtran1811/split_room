@@ -15,9 +15,13 @@ import {
   filterMyPreviousDebts,
   usePreviousDebts,
 } from "../hooks/usePreviousDebts";
-import { ROSTER, ROSTER_IDS, nameOf } from "../config/roster";
+import { ROSTER, ROSTER_IDS } from "../config/roster";
 import { resolveMemberIdFromEmail } from "../config/members.map";
-import { canOperateMonth, canViewFullSettlement } from "../core/roles";
+import { canAddExpense, canOperateMonth, canViewFullSettlement } from "../core/roles";
+import { collectRecentNotes } from "../features/expenses/quickEntry";
+import { ExpenseFormSheet } from "../features/expenses/ExpenseFormSheet";
+import { useMemberLabel } from "../hooks/useMemberLabel";
+import { NicknameSheet } from "../shared/ui/NicknameSheet";
 import { buildMonthlySettlementView } from "../domain/matrix/compute";
 import {
   filterBalancesForMember,
@@ -37,7 +41,10 @@ export function DashboardPage() {
   const session = useSession();
   const navigate = useNavigate();
   const { showToast } = useToast();
+  const labelOf = useMemberLabel();
   const [closing, setClosing] = useState(false);
+  const [expenseSheetOpen, setExpenseSheetOpen] = useState(false);
+  const [nicknameOpen, setNicknameOpen] = useState(false);
 
   const myMemberId =
     session.memberProfile?.memberId ||
@@ -142,12 +149,11 @@ export function DashboardPage() {
     const ids = viewFull ? ROSTER.map((m) => m.id) : [myMemberId];
     return ids
       .map((id) => {
-        const rosterMember = ROSTER.find((m) => m.id === id);
         const value = Number(balances?.[id] || 0);
-        return { id, name: rosterMember?.name || nameOf(id), value };
+        return { id, name: labelOf(id), value };
       })
       .sort((a, b) => a.value - b.value);
-  }, [balances, viewFull, myMemberId]);
+  }, [balances, viewFull, myMemberId, labelOf]);
 
   const maxAbsBalance = useMemo(
     () => Math.max(1, ...memberBalances.map((item) => Math.abs(item.value))),
@@ -156,6 +162,17 @@ export function DashboardPage() {
 
   const operator = canOperateMonth(session.memberProfile);
   const canCloseMonth = operator && !session.lockedSoft;
+  const canAddNow =
+    canAddExpense(session.memberProfile, session.user?.email || "") && !session.lockedSoft;
+  const noteSuggestions = useMemo(() => collectRecentNotes(expenses), [expenses]);
+
+  function openExpenseSheet() {
+    if (!canAddNow) {
+      navigate("/expenses");
+      return;
+    }
+    setExpenseSheetOpen(true);
+  }
 
   async function handleCloseMonth() {
     if (!session.groupId) return;
@@ -199,9 +216,14 @@ export function DashboardPage() {
             : `Tháng ${session.selectedPeriod} · chỉ khoản nợ liên quan bạn`
         }
         action={
-          <Button variant="ghost" className="btn--sm" onClick={() => navigate("/expenses")}>
-            + Chi tiêu
-          </Button>
+          <div className="btn-row">
+            <Button variant="ghost" className="btn--sm" onClick={() => setNicknameOpen(true)}>
+              Biệt danh
+            </Button>
+            <Button variant="ghost" className="btn--sm" onClick={openExpenseSheet}>
+              + Chi tiêu
+            </Button>
+          </div>
         }
       />
 
@@ -238,7 +260,7 @@ export function DashboardPage() {
             key: "rent",
             label: "Tiền nhà",
             value: rentDoc ? formatVND(rentTotal) : "Chưa có",
-            hint: rentDoc ? `Người trả: ${nameOf(rentPayerId)}` : "Chưa nhập",
+            hint: rentDoc ? `Người trả: ${labelOf(rentPayerId)}` : "Chưa nhập",
             tone: rentDoc ? "neutral" : "warning",
           },
         ]}
@@ -320,8 +342,8 @@ export function DashboardPage() {
                   <MoneyRow
                     key={`${item.fromId}-${item.toId}-${index}`}
                     memberId={item.fromId}
-                    avatarLabel={nameOf(item.fromId)}
-                    title={`${nameOf(item.fromId)} → ${nameOf(item.toId)}`}
+                    avatarLabel={labelOf(item.fromId)}
+                    title={`${labelOf(item.fromId)} → ${labelOf(item.toId)}`}
                     subtitle={mine ? (iPay ? "Bạn cần chuyển" : "Bạn sẽ nhận") : undefined}
                     amount={formatVND(item.amount)}
                     tone={tone}
@@ -378,8 +400,8 @@ export function DashboardPage() {
               <MoneyRow
                 key={`${item.period}-${item.fromId}-${item.toId}`}
                 memberId={item.fromId}
-                avatarLabel={nameOf(item.fromId)}
-                title={`${nameOf(item.fromId)} → ${nameOf(item.toId)}`}
+                avatarLabel={labelOf(item.fromId)}
+                title={`${labelOf(item.fromId)} → ${labelOf(item.toId)}`}
                 badge={formatPeriodShort(item.period)}
                 amount={formatVND(item.amount)}
                 tone={item.fromId === myMemberId ? "due" : "neutral"}
@@ -408,7 +430,7 @@ export function DashboardPage() {
               title="Chưa có chi tiêu"
               description="Thêm khoản chi để nhóm theo dõi chung."
               action={
-                <Button variant="primary" onClick={() => navigate("/expenses")}>
+                <Button variant="primary" onClick={openExpenseSheet}>
                   Thêm khoản chi
                 </Button>
               }
@@ -419,9 +441,9 @@ export function DashboardPage() {
                 <MoneyRow
                   key={expense.id}
                   memberId={expense.payerId || ""}
-                  avatarLabel={nameOf(expense.payerId || "")}
+                  avatarLabel={labelOf(expense.payerId || "")}
                   title={expense.note || "Khoản chi"}
-                  subtitle={`${expense.date} · ${nameOf(expense.payerId || "")} trả`}
+                  subtitle={`${expense.date} · ${labelOf(expense.payerId || "")} trả`}
                   amount={formatVND(expense.amount)}
                 />
               ))}
@@ -454,8 +476,8 @@ export function DashboardPage() {
                   <MoneyRow
                     key={member.id}
                     memberId={member.id}
-                    avatarLabel={member.name}
-                    title={member.name}
+                    avatarLabel={labelOf(member.id)}
+                    title={labelOf(member.id)}
                     badge={isPayer ? "Người trả" : member.id === myMemberId ? "Bạn" : undefined}
                     subtitle={`Phần ${formatVND(share)} · đã ${formatVND(paid)}`}
                     amount={due > 0 ? formatVND(due) : "Đủ"}
@@ -480,6 +502,13 @@ export function DashboardPage() {
           </Button>
         </section>
       ) : null}
+
+      <ExpenseFormSheet
+        open={expenseSheetOpen}
+        onClose={() => setExpenseSheetOpen(false)}
+        noteSuggestions={noteSuggestions}
+      />
+      <NicknameSheet open={nicknameOpen} onClose={() => setNicknameOpen(false)} />
     </div>
   );
 }

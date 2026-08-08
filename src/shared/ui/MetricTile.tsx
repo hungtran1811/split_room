@@ -30,9 +30,10 @@ type MetricGridProps = {
 export function MetricGrid({ tiles, columns = 4 }: MetricGridProps) {
   return (
     <section className={`metric-grid metric-grid--${columns}`}>
-      {tiles.map((tile, index) => (
-        <MetricTile key={tile.key ?? index} {...tile} />
-      ))}
+      {tiles.map((tile, index) => {
+        const { key, ...tileProps } = tile;
+        return <MetricTile key={key ?? index} {...tileProps} />;
+      })}
     </section>
   );
 }

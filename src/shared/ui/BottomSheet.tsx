@@ -1,13 +1,15 @@
 import { useEffect, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 
 type BottomSheetProps = {
   open: boolean;
   onClose: () => void;
   title: string;
   children: ReactNode;
+  footer?: ReactNode;
 };
 
-export function BottomSheet({ open, onClose, title, children }: BottomSheetProps) {
+export function BottomSheet({ open, onClose, title, children, footer }: BottomSheetProps) {
   useEffect(() => {
     if (!open) return;
 
@@ -26,7 +28,7 @@ export function BottomSheet({ open, onClose, title, children }: BottomSheetProps
 
   if (!open) return null;
 
-  return (
+  return createPortal(
     <div className="bottom-sheet is-open">
       <button
         type="button"
@@ -34,16 +36,20 @@ export function BottomSheet({ open, onClose, title, children }: BottomSheetProps
         aria-label="Đóng"
         onClick={onClose}
       />
-      <div className="bottom-sheet__panel" role="dialog" aria-modal="true" aria-label={title}>
+      <div className="bottom-sheet__panel" role="dialog" aria-modal="true" aria-labelledby="bottomSheetTitle">
         <div className="bottom-sheet__handle" aria-hidden="true" />
         <div className="bottom-sheet__header">
-          <h2 className="bottom-sheet__title">{title}</h2>
+          <h2 className="bottom-sheet__title" id="bottomSheetTitle">
+            {title}
+          </h2>
           <button type="button" className="bottom-sheet__close" aria-label="Đóng" onClick={onClose}>
             ×
           </button>
         </div>
         <div className="bottom-sheet__body">{children}</div>
+        {footer ? <div className="bottom-sheet__footer">{footer}</div> : null}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

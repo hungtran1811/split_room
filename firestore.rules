@@ -190,6 +190,22 @@ service cloud.firestore {
         && request.resource.data.createdBy == request.auth.uid;
     }
 
+    function validNicknameWrite(groupId, memberId) {
+      return isGroupMember(groupId)
+        && memberId.matches('^[a-z0-9_-]{1,24}$')
+        && request.resource.data.keys().hasOnly(["nickname", "updatedBy", "updatedAt"])
+        && request.resource.data.nickname is string
+        && request.resource.data.nickname.size() > 0
+        && request.resource.data.nickname.size() <= 24
+        && request.resource.data.updatedBy == request.auth.uid
+        && (
+          !request.resource.data.keys().hasAny(["updatedAt"])
+          || request.resource.data.updatedAt == null
+          || request.resource.data.updatedAt is string
+          || request.resource.data.updatedAt is timestamp
+        );
+    }
+
     function validPaymentShape() {
       return request.resource.data.keys().hasAll([
           "date",
@@ -238,6 +254,12 @@ service cloud.firestore {
           );
 
         allow delete: if isGroupOwner(groupId);
+      }
+
+      match /nicknames/{memberId} {
+        allow read: if isGroupMember(groupId);
+        allow create, update: if validNicknameWrite(groupId, memberId);
+        allow delete: if isGroupMember(groupId);
       }
 
       match /expenses/{expenseId} {

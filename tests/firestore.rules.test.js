@@ -520,6 +520,47 @@ describe("firestore rules", () => {
     );
   });
 
+  it("allows any group member to set and clear shared nicknames", async () => {
+    const memberDb = authenticatedDb(MEMBER_UID);
+    const outsiderDb = authenticatedDb(OUTSIDER_UID);
+
+    await assertSucceeds(
+      memberDb.doc(`groups/${GROUP_ID}/nicknames/thao`).set({
+        nickname: "Meo",
+        updatedBy: MEMBER_UID,
+        updatedAt: "now",
+      }),
+    );
+
+    await assertSucceeds(
+      memberDb.doc(`groups/${GROUP_ID}/nicknames/thao`).delete(),
+    );
+
+    await assertFails(
+      outsiderDb.doc(`groups/${GROUP_ID}/nicknames/thao`).set({
+        nickname: "Hack",
+        updatedBy: OUTSIDER_UID,
+        updatedAt: "now",
+      }),
+    );
+
+    await assertFails(
+      memberDb.doc(`groups/${GROUP_ID}/nicknames/thao`).set({
+        nickname: "x".repeat(40),
+        updatedBy: MEMBER_UID,
+        updatedAt: "now",
+      }),
+    );
+
+    await assertFails(
+      memberDb.doc(`groups/${GROUP_ID}/nicknames/thao`).set({
+        nickname: "Meo",
+        updatedBy: OWNER_UID,
+        updatedAt: "now",
+      }),
+    );
+  });
+
   it("keeps the seeded membership roles unchanged after denied writes", async () => {
     const adminDb = authenticatedDb(ADMIN_UID);
     await assertFails(

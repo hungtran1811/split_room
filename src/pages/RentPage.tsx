@@ -6,9 +6,12 @@ import { PageLoadingSkeleton } from "../shared/ui/Skeleton";
 import { useToast } from "../shared/ui/Toast";
 import { useSession } from "../app/SessionContext";
 import { useLiveMonth } from "../hooks/useLiveMonth";
-import { ROSTER, ROSTER_IDS, nameOf } from "../config/roster";
+import { ROSTER, ROSTER_IDS } from "../config/roster";
 import { OWNER_MEMBER_ID } from "../config/constants";
 import { canEditRent } from "../core/roles";
+import { useMemberLabel } from "../hooks/useMemberLabel";
+import { MemberAvatar } from "../shared/ui/MemberAvatar";
+import { NicknameSheet } from "../shared/ui/NicknameSheet";
 import {
   buildEqualShares,
   clampNonNegative,
@@ -128,7 +131,9 @@ function formatUpdatedAt(value: unknown): string {
 export function RentPage() {
   const session = useSession();
   const { showToast } = useToast();
+  const labelOf = useMemberLabel();
   const live = useLiveMonth("rent", session.groupId, session.selectedPeriod);
+  const [nicknameOpen, setNicknameOpen] = useState(false);
   const [form, setForm] = useState<RentForm>(emptyForm);
   const [step, setStep] = useState<0 | 1 | 2>(0);
   const [saving, setSaving] = useState(false);
@@ -262,6 +267,11 @@ export function RentPage() {
       <PageHeader
         title="Tiền nhà"
         subtitle={`Tháng ${session.selectedPeriod} · phần mỗi người và đã trả`}
+        action={
+          <Button variant="ghost" className="btn--sm" onClick={() => setNicknameOpen(true)}>
+            Biệt danh
+          </Button>
+        }
       />
 
       {session.lockedSoft ? (
@@ -335,7 +345,7 @@ export function RentPage() {
               >
                 {ROSTER.map((member) => (
                   <option key={member.id} value={member.id}>
-                    {member.name}
+                    {labelOf(member.id)}
                   </option>
                 ))}
               </select>
@@ -402,8 +412,9 @@ export function RentPage() {
           </div>
           <div className="debts-grid">
             {ROSTER.map((member) => (
-              <div key={member.id} className="debt-input-row">
-                <label className="form-hint">{member.name}</label>
+              <div key={member.id} className="debt-input-row debt-input-row--member">
+                <MemberAvatar memberId={member.id} label={labelOf(member.id)} size={36} />
+                <label className="form-hint">{labelOf(member.id)}</label>
                 <input
                   className="form-input"
                   disabled={!canEdit || form.splitEqual}
@@ -425,7 +436,7 @@ export function RentPage() {
 
       {step === 2 ? (
         <section className="card">
-          <h2 className="section-title">3. Mọi người đã chuyển cho {nameOf(form.payerId)} bao nhiêu</h2>
+          <h2 className="section-title">3. Mọi người đã chuyển cho {labelOf(form.payerId)} bao nhiêu</h2>
           <div className="stack-list">
             {ROSTER_IDS.filter((id) => id !== form.payerId).map((memberId) => {
               const share = Number(shares[memberId] || 0);
@@ -434,7 +445,10 @@ export function RentPage() {
               return (
                 <div key={memberId} className="rent-member-row">
                   <div className="rent-member-row__head">
-                    <span className="rent-member-row__name">{nameOf(memberId)}</span>
+                    <span className="rent-member-row__who">
+                      <MemberAvatar memberId={memberId} label={labelOf(memberId)} size={36} />
+                      <span className="rent-member-row__name">{labelOf(memberId)}</span>
+                    </span>
                     <span className={`status-badge ${due <= 0 && share > 0 ? "status-badge--settled" : share <= 0 ? "status-badge--pending" : "status-badge--debt"}`}>
                       {share <= 0 ? "Chưa nhập" : due <= 0 ? "Đã đủ" : "Còn thiếu"}
                     </span>
@@ -461,7 +475,7 @@ export function RentPage() {
               <div className="metric-tile__value">{formatVND(collected)}</div>
             </div>
             <div className="metric-tile metric-tile--warning">
-              <div className="metric-tile__label">{nameOf(form.payerId)} đang gánh</div>
+              <div className="metric-tile__label">{labelOf(form.payerId)} đang gánh</div>
               <div className="metric-tile__value">{formatVND(payerBurden)}</div>
             </div>
             <div className="metric-tile metric-tile--danger">
@@ -474,6 +488,8 @@ export function RentPage() {
           <div className="form-error">{message}</div>
         </section>
       ) : null}
+
+      <NicknameSheet open={nicknameOpen} onClose={() => setNicknameOpen(false)} />
 
       <div className="rent-wizard-nav">
         <div>

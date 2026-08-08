@@ -14,7 +14,8 @@ import {
   filterMyPreviousDebts,
   usePreviousDebts,
 } from "../hooks/usePreviousDebts";
-import { ROSTER, ROSTER_IDS, nameOf } from "../config/roster";
+import { ROSTER, ROSTER_IDS } from "../config/roster";
+import { useMemberLabel } from "../hooks/useMemberLabel";
 import { resolveMemberIdFromEmail } from "../config/members.map";
 import { canRecordPayment, canViewFullSettlement } from "../core/roles";
 import { getMonthRange, lastDayOfPeriod } from "../core/period";
@@ -89,6 +90,7 @@ export function PaymentsPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { showToast } = useToast();
+  const labelOf = useMemberLabel();
   const live = useLiveMonth("payments", session.groupId, session.selectedPeriod);
   const previous = usePreviousDebts(session.groupId, session.selectedPeriod);
   const [activeTab, setActiveTab] = useState("suggest");
@@ -239,7 +241,7 @@ export function PaymentsPage() {
   async function handleDeletePayment(payment: PaymentDoc) {
     if (!session.groupId) return;
     const confirmed = window.confirm(
-      `Xóa thanh toán ${nameOf(payment.fromId || "")} → ${nameOf(payment.toId || "")} (${formatVND(payment.amount)})?`,
+      `Xóa thanh toán ${labelOf(payment.fromId || "")} → ${labelOf(payment.toId || "")} (${formatVND(payment.amount)})?`,
     );
     if (!confirmed) return;
 
@@ -305,7 +307,7 @@ export function PaymentsPage() {
                       className="list-row settlement-item--mine"
                     >
                       <div className="list-row__body">
-                        <div className="list-row__title">Bạn → {nameOf(item.toId)}</div>
+                        <div className="list-row__title">Bạn → {labelOf(item.toId)}</div>
                         <div className="list-row__subtitle">{formatPeriodShort(item.period)}</div>
                       </div>
                       <div className="list-row__amount money-due">{formatVND(item.amount)}</div>
@@ -358,10 +360,10 @@ export function PaymentsPage() {
                         <div className="list-row__body">
                           <div className="list-row__title">
                             {iPay
-                              ? `Bạn → ${nameOf(item.toId)}`
+                              ? `Bạn → ${labelOf(item.toId)}`
                               : iReceive
-                                ? `${nameOf(item.fromId)} → Bạn`
-                                : `${nameOf(item.fromId)} → ${nameOf(item.toId)}`}
+                                ? `${labelOf(item.fromId)} → Bạn`
+                                : `${labelOf(item.fromId)} → ${labelOf(item.toId)}`}
                           </div>
                           {mine ? (
                             <div className="list-row__subtitle">
@@ -406,7 +408,7 @@ export function PaymentsPage() {
                   <article key={payment.id} className="list-row">
                     <div className="list-row__body">
                       <div className="list-row__title">
-                        {nameOf(payment.fromId || "")} → {nameOf(payment.toId || "")}
+                        {labelOf(payment.fromId || "")} → {labelOf(payment.toId || "")}
                       </div>
                       <div className="list-row__subtitle">
                         {payment.date}
@@ -456,14 +458,14 @@ export function PaymentsPage() {
                     <tr>
                       <th></th>
                       {ROSTER.map((member) => (
-                        <th key={member.id}>{member.name}</th>
+                        <th key={member.id}>{labelOf(member.id)}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
                     {ROSTER.map((row) => (
                       <tr key={row.id}>
-                        <th>{row.name}</th>
+                        <th>{labelOf(row.id)}</th>
                         {ROSTER.map((col) => {
                           const isDiag = row.id === col.id;
                           const value = liveSettlement.grossMatrix?.[row.id]?.[col.id] ?? 0;
@@ -495,7 +497,7 @@ export function PaymentsPage() {
                   return (
                     <div key={member.id} className="balances-list__row">
                       <div>
-                        <div className="list-row__title">{member.name}</div>
+                        <div className="list-row__title">{labelOf(member.id)}</div>
                         <div className="list-row__subtitle">{label}</div>
                       </div>
                       <strong>{formatVND(Math.abs(value))}</strong>
@@ -518,11 +520,11 @@ export function PaymentsPage() {
           <div className="form-grid form-grid--2">
             <div className="form-field">
               <span className="form-label">Người trả</span>
-              <input className="form-input" value={nameOf(paySheet.fromId)} disabled />
+              <input className="form-input" value={labelOf(paySheet.fromId)} disabled />
             </div>
             <div className="form-field">
               <span className="form-label">Người nhận</span>
-              <input className="form-input" value={nameOf(paySheet.toId)} disabled />
+              <input className="form-input" value={labelOf(paySheet.toId)} disabled />
             </div>
           </div>
           <div className="form-field">

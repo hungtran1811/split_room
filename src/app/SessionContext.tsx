@@ -23,6 +23,7 @@ import {
   upsertMemberProfile,
   watchGroupMembers,
 } from "../services/member.service";
+import { watchNicknames } from "../services/nickname.service";
 import { getPeriod } from "../services/period.service";
 
 export type BootStatus = "loading" | "needs-config" | "error" | "ready" | "signed-out";
@@ -34,6 +35,7 @@ type SessionContextValue = {
   groupId: string | null;
   memberProfile: MemberProfile | null;
   members: MemberProfile[];
+  nicknames: Record<string, string>;
   selectedPeriod: string;
   setSelectedPeriod: (period: string) => void;
   periodDoc: PeriodDoc | null;
@@ -62,6 +64,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [groupId, setGroupId] = useState<string | null>(null);
   const [memberProfile, setMemberProfile] = useState<MemberProfile | null>(null);
   const [members, setMembers] = useState<MemberProfile[]>([]);
+  const [nicknames, setNicknames] = useState<Record<string, string>>({});
   const [selectedPeriod, setSelectedPeriodState] = useState<string>(readStoredPeriod);
   const [periodDoc, setPeriodDoc] = useState<PeriodDoc | null>(null);
 
@@ -120,6 +123,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         stopGroupSubscriptions();
         setGroupId(null);
         setMembers([]);
+        setNicknames({});
         setMemberProfile(null);
         setPeriodDoc(null);
         setBootStatus("signed-out");
@@ -135,8 +139,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         await upsertMemberProfile(nextGroupId, nextUser);
 
         stopGroupSubscriptions();
-        // Một listener members đủ cho cả roster + profile của mình (tiết kiệm quota).
-        groupUnsubRef.current = watchGroupMembers(nextGroupId, (nextMembers) => {
+        const unsubMembers = watchGroupMembers(nextGroupId, (nextMembers) => {
           const typed = nextMembers as MemberProfile[];
           setMembers(typed);
           const mine =
@@ -148,6 +151,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             ) || null;
           setMemberProfile(mine);
         });
+        const unsubNicknames = watchNicknames(nextGroupId, setNicknames);
+        groupUnsubRef.current = () => {
+          unsubMembers();
+          unsubNicknames();
+        };
 
         setBootStatus("ready");
       } catch (error) {
@@ -176,6 +184,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     groupId,
     memberProfile,
     members,
+    nicknames,
     selectedPeriod,
     setSelectedPeriod,
     periodDoc,

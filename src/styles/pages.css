@@ -15,6 +15,7 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
+  min-width: 0;
 }
 
 .reports-page {
@@ -84,6 +85,10 @@
   margin: 0;
 }
 
+.overview-panel__action {
+  flex-shrink: 0;
+}
+
 .overview-panel .card__head {
   margin-bottom: var(--space-3);
   align-items: center;
@@ -111,12 +116,17 @@
 
 .money-row {
   display: grid;
-  grid-template-columns: 36px minmax(0, 1fr) minmax(6.5rem, max-content);
+  grid-template-columns: 36px minmax(0, 1fr) max-content;
   align-items: start;
   column-gap: var(--space-3);
   padding: 12px 0;
   border-bottom: 1px solid var(--border);
   width: 100%;
+  min-width: 0;
+}
+
+.money-row--no-avatar {
+  grid-template-columns: minmax(0, 1fr) max-content;
 }
 
 .money-row:last-child {
@@ -168,13 +178,15 @@
   align-items: center;
   gap: 6px;
   line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 
 .money-row__subtitle {
   margin-top: 2px;
   font-size: var(--text-xs);
   color: var(--ink-muted);
-  line-height: 1.4;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 .money-row__bar {
@@ -261,12 +273,15 @@
 }
 
 .balance-strip__value {
-  font-size: clamp(1.35rem, 5vw, 1.75rem);
+  font-size: clamp(1.25rem, 4.6vw, 1.75rem);
   font-weight: 700;
   letter-spacing: -0.03em;
   font-variant-numeric: tabular-nums;
   line-height: 1.15;
   min-height: 1.15em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .balance-strip__hint {
@@ -460,6 +475,7 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
+  min-width: 0;
 }
 
 .expense-toolbar {
@@ -488,7 +504,8 @@
 
 .expense-toolbar__date {
   width: auto;
-  min-width: 10.5rem;
+  min-width: 0;
+  max-width: 12rem;
 }
 
 .expense-timeline {
@@ -513,6 +530,7 @@
   background: var(--surface-2);
   border-bottom: 1px solid var(--border);
   border-radius: var(--radius-md) var(--radius-md) 0 0;
+  min-width: 0;
 }
 
 .expense-day__date {
@@ -520,6 +538,8 @@
   font-weight: 800;
   letter-spacing: -0.02em;
   color: var(--ink);
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .expense-day__stats {
@@ -529,6 +549,8 @@
   font-size: var(--text-xs);
   color: var(--ink-muted);
   font-weight: 600;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .expense-day__total {
@@ -564,6 +586,7 @@
   font-size: var(--text-sm);
   letter-spacing: -0.01em;
   line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 
 .expense-row__meta {
@@ -571,6 +594,7 @@
   font-size: var(--text-xs);
   color: var(--ink-muted);
   line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 
 .expense-row__debts {
@@ -588,6 +612,7 @@
   font-size: 11px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .expense-row__chip--more {
@@ -602,7 +627,7 @@
   align-items: flex-end;
   gap: 6px;
   flex-shrink: 0;
-  min-width: 6.5rem;
+  max-width: 46%;
 }
 
 .expense-row__amount {
@@ -635,6 +660,57 @@
   justify-content: flex-end;
 }
 
+.expense-form {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.expense-form__amount {
+  height: 52px;
+  font-size: var(--text-lg);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+}
+
+.expense-form__row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+}
+
+.expense-form__chips {
+  gap: 6px;
+}
+
+.expense-form .quick-chip--sm,
+.expense-form .chip-toggle {
+  min-height: 32px;
+  padding: 4px 10px;
+  font-size: var(--text-xs);
+}
+
+.expense-form__split {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+.expense-form__split-head {
+  justify-content: space-between;
+}
+
+.expense-form .expense-summary-strip {
+  margin: 0;
+}
+
+.expense-form .form-error {
+  min-height: 0;
+}
+
 .expense-summary-strip {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -659,6 +735,7 @@
 .expense-summary-strip__value {
   font-weight: 700;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .expense-summary-strip__item span:first-child {
@@ -688,9 +765,13 @@
   align-items: center;
 }
 
+.debt-input-row--member {
+  grid-template-columns: 36px minmax(0, 1fr) 1.2fr;
+}
+
 .summary-strip {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--space-2);
   margin-bottom: var(--space-4);
 }
@@ -713,6 +794,9 @@
 .summary-strip__value {
   font-weight: 700;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-size: var(--text-sm);
   color: var(--ink);
 }
@@ -898,12 +982,27 @@
   margin-bottom: var(--space-2);
   font-weight: 700;
   font-size: var(--text-sm);
+  min-width: 0;
+}
+
+.rent-member-row__who {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+}
+
+.rent-member-row__name {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .rent-member-row__info {
   margin-top: 6px;
   font-size: var(--text-xs);
   color: var(--ink-muted);
+  overflow-wrap: anywhere;
 }
 
 .rent-updated {
@@ -1150,6 +1249,10 @@
   font-size: 11px;
   font-weight: 700;
   color: var(--ink-muted);
+  white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .chart-bars__track {
@@ -1220,6 +1323,7 @@
   margin-top: 2px;
   font-size: var(--text-xs);
   color: var(--ink-muted);
+  overflow-wrap: anywhere;
 }
 
 .chart-legend__amount {
@@ -1339,7 +1443,7 @@
 
 .rent-collection__summary {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--space-3);
   margin-bottom: var(--space-4);
 }
@@ -1353,6 +1457,9 @@
 .rent-collection__value {
   font-size: var(--text-sm);
   font-weight: 800;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .rent-collection__payer {
@@ -1361,6 +1468,14 @@
   gap: 8px;
   font-weight: 700;
   font-size: var(--text-sm);
+  min-width: 0;
+}
+
+.rent-collection__payer span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .rent-collection__progress {
@@ -1416,12 +1531,20 @@
   align-items: center;
   gap: 8px;
   font-weight: 700;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .rent-collection__meta {
   margin-top: 2px;
   font-size: var(--text-xs);
   color: var(--ink-muted);
+  overflow-wrap: anywhere;
+}
+
+.rent-collection__item > strong {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 .rent-collection__bar {
@@ -1487,6 +1610,34 @@
 
 .avatar-picker__item:disabled {
   opacity: 0.6;
+}
+
+.nickname-sheet__hint {
+  margin: 0 0 var(--space-3);
+}
+
+.nickname-sheet__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.nickname-sheet__row {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  gap: var(--space-3);
+  align-items: start;
+}
+
+.nickname-sheet__meta {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.nickname-sheet__name {
+  font-size: var(--text-sm);
+  font-weight: 700;
 }
 
 @media (min-width: 480px) {

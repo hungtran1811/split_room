@@ -1,6 +1,6 @@
 import { chartColorOf } from "../../config/avatars";
-import { nameOf } from "../../config/roster";
 import { formatVND } from "../../shared/lib/format";
+import { useMemberLabel } from "../../hooks/useMemberLabel";
 import type { TopPayerRow } from "../../domain/report/top-payers";
 import { MemberAvatar } from "../../shared/ui/MemberAvatar";
 
@@ -83,6 +83,7 @@ function DonutChart({ rows, total }: { rows: TopPayerRow[]; total: number }) {
 }
 
 function BarChart({ rows, total, myMemberId }: ChartProps) {
+  const labelOf = useMemberLabel();
   const max = Math.max(1, ...rows.map((row) => row.total));
 
   return (
@@ -104,11 +105,11 @@ function BarChart({ rows, total, myMemberId }: ChartProps) {
                   height: `${height}px`,
                   background: chartColorOf(row.payerId),
                 }}
-                title={`${nameOf(row.payerId)}: ${formatVND(row.total)}`}
+                title={`${labelOf(row.payerId)}: ${formatVND(row.total)}`}
               />
             </div>
             <MemberAvatar memberId={row.payerId} size={28} />
-            <div className="chart-bars__name">{nameOf(row.payerId)}</div>
+            <div className="chart-bars__name">{labelOf(row.payerId)}</div>
           </div>
         );
       })}
@@ -117,6 +118,7 @@ function BarChart({ rows, total, myMemberId }: ChartProps) {
 }
 
 export function TopPayerCharts({ rows, total, myMemberId }: ChartProps) {
+  const labelOf = useMemberLabel();
   if (!rows.length) return null;
 
   return (
@@ -137,7 +139,7 @@ export function TopPayerCharts({ rows, total, myMemberId }: ChartProps) {
                     className="chart-legend__swatch"
                     style={{ background: chartColorOf(row.payerId) }}
                   />
-                  {nameOf(row.payerId)}
+                  {labelOf(row.payerId)}
                   {row.payerId === myMemberId ? " (Bạn)" : ""}
                 </div>
                 <div className="chart-legend__meta">

@@ -8,6 +8,7 @@ import { updateOwnAvatar } from "../services/member.service";
 import { NotificationBell } from "../features/notifications/NotificationBell";
 import { AvatarPicker } from "../shared/ui/AvatarPicker";
 import { BottomSheet } from "../shared/ui/BottomSheet";
+import { NicknameSheet } from "../shared/ui/NicknameSheet";
 import { BrandLogo } from "../shared/ui/BrandLogo";
 import { MemberAvatar } from "../shared/ui/MemberAvatar";
 import { useToast } from "../shared/ui/Toast";
@@ -66,6 +67,7 @@ export function AppShell() {
   const { showToast } = useToast();
   const [profileOpen, setProfileOpen] = useState(false);
   const [avatarOpen, setAvatarOpen] = useState(false);
+  const [nicknameOpen, setNicknameOpen] = useState(false);
   const [avatarSaving, setAvatarSaving] = useState(false);
   const profileRef = useRef<HTMLDivElement>(null);
 
@@ -177,6 +179,16 @@ export function AppShell() {
                 >
                   Đổi avatar thú cưng
                 </button>
+                <button
+                  type="button"
+                  className="profile-menu__item"
+                  onClick={() => {
+                    setProfileOpen(false);
+                    setNicknameOpen(true);
+                  }}
+                >
+                  Đặt biệt danh
+                </button>
                 {owner ? (
                   <button
                     type="button"
@@ -233,6 +245,8 @@ export function AppShell() {
           ))}
         </div>
       </nav>
+
+      <NicknameSheet open={nicknameOpen} onClose={() => setNicknameOpen(false)} />
 
       <BottomSheet
         open={avatarOpen}

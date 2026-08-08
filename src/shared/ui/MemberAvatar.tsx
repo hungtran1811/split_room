@@ -1,5 +1,5 @@
 import { resolvePetAvatar } from "../../config/avatars";
-import { nameOf } from "../../config/roster";
+import { resolveMemberLabel } from "../../domain/members/nicknames";
 import { useSession } from "../../app/SessionContext";
 
 type MemberAvatarProps = {
@@ -39,7 +39,8 @@ export function MemberAvatar({
     photoURL: resolvedPhoto,
     memberId: memberId || String(fromMembers?.memberId || ""),
   });
-  const title = label || (memberId ? nameOf(memberId) : pet.label);
+  const title =
+    label || (memberId ? resolveMemberLabel(memberId, session.nicknames) : pet.label);
 
   return (
     <img

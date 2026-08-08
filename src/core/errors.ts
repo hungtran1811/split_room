@@ -2,7 +2,7 @@ export function mapFirestoreError(error: unknown, fallbackMessage?: string): str
   const code = String((error as { code?: string })?.code || "");
 
   if (code.includes("permission-denied")) {
-    return "Bạn không có quyền thực hiện thao tác này.";
+    return fallbackMessage || "Bạn không có quyền thực hiện thao tác này.";
   }
 
   if (code.includes("failed-precondition")) {

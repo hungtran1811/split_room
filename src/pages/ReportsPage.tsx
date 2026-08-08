@@ -8,7 +8,8 @@ import { PageHeader } from "../shared/ui/PageHeader";
 import { PageLoadingSkeleton, SkeletonList } from "../shared/ui/Skeleton";
 import { useSession } from "../app/SessionContext";
 import { useLiveMonth } from "../hooks/useLiveMonth";
-import { ROSTER_IDS, nameOf } from "../config/roster";
+import { ROSTER_IDS } from "../config/roster";
+import { useMemberLabel } from "../hooks/useMemberLabel";
 import { resolveMemberIdFromEmail } from "../config/members.map";
 import { shiftPeriod } from "../core/period";
 import {
@@ -34,6 +35,7 @@ function formatPeriodLabel(period: string): string {
 
 export function ReportsPage() {
   const session = useSession();
+  const labelOf = useMemberLabel();
   const live = useLiveMonth("reports", session.groupId, session.selectedPeriod);
   const previousPeriod = shiftPeriod(session.selectedPeriod, -1);
 
@@ -193,9 +195,9 @@ export function ReportsPage() {
               <MoneyRow
                 key={item.id}
                 memberId={item.payerId}
-                avatarLabel={nameOf(item.payerId)}
+                avatarLabel={labelOf(item.payerId)}
                 title={item.note || "Khoản chi"}
-                subtitle={`${item.date} · ${nameOf(item.payerId)} trả`}
+                subtitle={`${item.date} · ${labelOf(item.payerId)} trả`}
                 amount={formatVND(item.amount)}
               />
             ))}

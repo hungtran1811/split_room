@@ -48,9 +48,7 @@ export function MoneyRow({
         <div className="money-row__avatar-wrap" aria-hidden="true">
           <MemberAvatar memberId={memberId} label={avatarLabel} size={36} />
         </div>
-      ) : (
-        <span className="money-row__avatar-spacer" aria-hidden="true" />
-      )}
+      ) : null}
       <div className="money-row__body">
         <div className="money-row__title">
           {title}

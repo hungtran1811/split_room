@@ -79,6 +79,7 @@ html,
 body,
 #root {
   min-height: 100%;
+  max-width: 100%;
 }
 
 body {
@@ -314,6 +315,8 @@ button {
   border-radius: var(--radius-md);
   box-shadow: var(--elev-1);
   padding: var(--space-5);
+  min-width: 0;
+  max-width: 100%;
 }
 
 .card + .card {
@@ -328,17 +331,24 @@ button {
   margin-bottom: var(--space-4);
 }
 
+.card__head > :first-child {
+  min-width: 0;
+  flex: 1;
+}
+
 .card__title {
   margin: 0;
   font-size: var(--text-lg);
   font-weight: 700;
   letter-spacing: -0.02em;
+  overflow-wrap: anywhere;
 }
 
 .card__subtitle {
   margin: var(--space-1) 0 0;
   color: var(--ink-muted);
   font-size: var(--text-sm);
+  overflow-wrap: anywhere;
 }
 
 .stack-list {
@@ -386,6 +396,12 @@ button {
   justify-content: space-between;
   gap: var(--space-3);
   margin-bottom: var(--space-5);
+  min-width: 0;
+}
+
+.page-header > :first-child {
+  min-width: 0;
+  flex: 1;
 }
 
 .page-header__title {
@@ -400,10 +416,16 @@ button {
   color: var(--ink-muted);
   font-size: var(--text-sm);
   line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 .page-header__action {
   flex-shrink: 0;
+}
+
+.page-header__action .btn-row {
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .lock-banner {
@@ -584,22 +606,23 @@ button {
 
 .metric-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--space-3);
   align-items: stretch;
+  min-width: 0;
 }
 
 .metric-grid--3 {
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .metric-grid--4 {
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 @media (min-width: 640px) {
   .metric-grid--4 {
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
 
@@ -613,6 +636,7 @@ button {
   grid-template-rows: 2.6em minmax(1.6em, auto) 1.3em;
   align-items: start;
   gap: var(--space-1);
+  min-width: 0;
   min-height: 108px;
   height: 100%;
 }
@@ -635,10 +659,8 @@ button {
   line-height: 1.25;
   align-self: center;
   overflow: hidden;
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  word-break: break-word;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .metric-tile__hint {
@@ -802,7 +824,15 @@ button {
   min-height: 32px;
 }
 
-/* ---------- Bottom sheet ---------- */
+/* ---------- Bottom sheet / modal ---------- */
+
+body.app-sheet-open {
+  overflow: hidden;
+}
+
+body.app-sheet-open .bottom-nav {
+  visibility: hidden;
+}
 
 .bottom-sheet {
   position: fixed;
@@ -832,21 +862,33 @@ button {
 
 .bottom-sheet__panel {
   position: relative;
+  display: flex;
+  flex-direction: column;
   width: 100%;
   max-width: var(--shell-max-width);
-  max-height: 88vh;
-  overflow-y: auto;
+  max-height: min(92dvh, 100dvh);
+  overflow: hidden;
   background: var(--surface-1);
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
   box-shadow: var(--elev-2);
-  padding: var(--space-2) var(--space-5) calc(var(--space-6) + var(--safe-bottom));
   animation: sheet-in var(--motion-medium);
 }
 
 @media (min-width: 640px) {
+  .bottom-sheet {
+    align-items: center;
+    padding: var(--space-6);
+  }
+
   .bottom-sheet__panel {
+    width: min(100%, 520px);
+    max-height: min(86vh, 720px);
     border-radius: var(--radius-lg);
-    margin-bottom: var(--space-6);
+    animation-name: dialog-in;
+  }
+
+  .bottom-sheet__handle {
+    display: none;
   }
 }
 
@@ -861,19 +903,33 @@ button {
   }
 }
 
+@keyframes dialog-in {
+  from {
+    transform: translateY(12px) scale(0.98);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
 .bottom-sheet__handle {
   width: 40px;
   height: 4px;
+  flex-shrink: 0;
   border-radius: var(--radius-pill);
   background: var(--border-strong);
-  margin: var(--space-2) auto var(--space-3);
+  margin: var(--space-2) auto 0;
 }
 
 .bottom-sheet__header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: var(--space-3);
+  flex-shrink: 0;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-5) var(--space-2);
 }
 
 .bottom-sheet__title {
@@ -893,7 +949,24 @@ button {
 }
 
 .bottom-sheet__body {
-  padding-bottom: var(--space-2);
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-2) var(--space-5) var(--space-4);
+  -webkit-overflow-scrolling: touch;
+}
+
+.bottom-sheet__footer {
+  flex-shrink: 0;
+  padding: var(--space-3) var(--space-5) calc(var(--space-4) + var(--safe-bottom));
+  border-top: 1px solid var(--border);
+  background: var(--surface-1);
+}
+
+.bottom-sheet__footer .btn-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: stretch;
 }
 
 .confirm-dialog {
@@ -1081,6 +1154,12 @@ select.form-input {
   min-height: 40px;
 }
 
+.quick-chip--sm {
+  min-height: 32px;
+  padding: 4px 10px;
+  font-size: var(--text-xs);
+}
+
 .quick-chip.is-active {
   background: var(--accent);
   color: #fff;
@@ -1127,14 +1206,16 @@ select.form-input {
 }
 
 .list-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content max-content;
   align-items: center;
-  gap: var(--space-3);
+  column-gap: var(--space-3);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   padding: var(--space-4);
   background: var(--surface-1);
   box-shadow: var(--elev-1);
+  min-width: 0;
   transition: border-color var(--motion-fast), box-shadow var(--motion-fast);
 }
 
@@ -1150,12 +1231,14 @@ select.form-input {
 .list-row__title {
   font-weight: 700;
   font-size: var(--text-sm);
+  overflow-wrap: anywhere;
 }
 
 .list-row__subtitle {
   font-size: var(--text-xs);
   color: var(--ink-muted);
   margin-top: 2px;
+  overflow-wrap: anywhere;
 }
 
 .list-row__amount {
@@ -1167,8 +1250,20 @@ select.form-input {
 
 .list-row__actions {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: var(--space-1);
   flex-shrink: 0;
+}
+
+@media (max-width: 420px) {
+  .list-row {
+    grid-template-columns: minmax(0, 1fr) max-content;
+  }
+
+  .list-row__actions {
+    grid-column: 1 / -1;
+  }
 }
 
 .page-head {
