@@ -1,9 +1,13 @@
 .login-page {
   min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  padding: var(--space-7) var(--space-5) calc(var(--space-7) + var(--safe-bottom));
+  padding: calc(var(--space-7) + var(--safe-top))
+    calc(var(--space-5) + var(--safe-right))
+    calc(var(--space-7) + var(--safe-bottom))
+    calc(var(--space-5) + var(--safe-left));
   background: var(--surface-0);
 }
 

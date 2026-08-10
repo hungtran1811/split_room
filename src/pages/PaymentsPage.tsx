@@ -5,6 +5,7 @@ import { Button } from "../shared/ui/Button";
 import { BottomSheet } from "../shared/ui/BottomSheet";
 import { EmptyState } from "../shared/ui/EmptyState";
 import { LockBanner, PageHeader, RowAction } from "../shared/ui/PageHeader";
+import { ResponsiveMoney } from "../shared/ui/ResponsiveMoney";
 import { SegmentedTabs, type SegmentedTab } from "../shared/ui/SegmentedTabs";
 import { PageLoadingSkeleton } from "../shared/ui/Skeleton";
 import { useToast } from "../shared/ui/Toast";
@@ -298,7 +299,7 @@ export function PaymentsPage() {
               <div className="card card--note">
                 <div className="card__head">
                   <h2 className="card__title">Tháng trước còn lại</h2>
-                  <span className="money-due">{formatVND(oldDebtTotal)}</span>
+                  <ResponsiveMoney amount={oldDebtTotal} className="money-due" />
                 </div>
                 <div className="stack-list">
                   {myOldDebts.map((item) => (
@@ -310,7 +311,9 @@ export function PaymentsPage() {
                         <div className="list-row__title">Bạn → {labelOf(item.toId)}</div>
                         <div className="list-row__subtitle">{formatPeriodShort(item.period)}</div>
                       </div>
-                      <div className="list-row__amount money-due">{formatVND(item.amount)}</div>
+                      <div className="list-row__amount money-due">
+                        <ResponsiveMoney amount={item.amount} />
+                      </div>
                     </article>
                   ))}
                 </div>
@@ -372,7 +375,7 @@ export function PaymentsPage() {
                           ) : null}
                         </div>
                         <div className={`list-row__amount ${iPay ? "money-due" : ""}`.trim()}>
-                          {formatVND(item.amount)}
+                          <ResponsiveMoney amount={item.amount} />
                         </div>
                         {canOperate ? (
                           <div className="list-row__actions">
@@ -415,7 +418,9 @@ export function PaymentsPage() {
                         {payment.note ? ` • ${payment.note}` : ""}
                       </div>
                     </div>
-                    <div className="list-row__amount">{formatVND(payment.amount)}</div>
+                    <div className="list-row__amount">
+                      <ResponsiveMoney amount={payment.amount} />
+                    </div>
                     {canOperate ? (
                       <div className="list-row__actions">
                         <RowAction label="Sửa" onClick={() => openEditPayment(payment)} />
@@ -432,11 +437,15 @@ export function PaymentsPage() {
             <div className="summary-strip">
               <div className="summary-strip__item">
                 <span className="summary-strip__label">Tổng từ chi chung</span>
-                <span className="summary-strip__value">{formatVND(liveSettlement.totals.grossDebtTotal)}</span>
+                <span className="summary-strip__value">
+                  <ResponsiveMoney amount={liveSettlement.totals.grossDebtTotal} />
+                </span>
               </div>
               <div className="summary-strip__item">
                 <span className="summary-strip__label">Đã chuyển</span>
-                <span className="summary-strip__value">{formatVND(liveSettlement.paymentsAppliedTotal)}</span>
+                <span className="summary-strip__value">
+                  <ResponsiveMoney amount={liveSettlement.paymentsAppliedTotal} />
+                </span>
               </div>
               <div className="summary-strip__item">
                 <span className="summary-strip__label">Còn lại</span>
@@ -445,7 +454,7 @@ export function PaymentsPage() {
                     liveSettlement.totals.remainingDebtTotal > 0 ? "money-due" : ""
                   }`.trim()}
                 >
-                  {formatVND(liveSettlement.totals.remainingDebtTotal)}
+                  <ResponsiveMoney amount={liveSettlement.totals.remainingDebtTotal} />
                 </span>
               </div>
             </div>
@@ -500,7 +509,9 @@ export function PaymentsPage() {
                         <div className="list-row__title">{labelOf(member.id)}</div>
                         <div className="list-row__subtitle">{label}</div>
                       </div>
-                      <strong>{formatVND(Math.abs(value))}</strong>
+                      <strong>
+                        <ResponsiveMoney amount={Math.abs(value)} />
+                      </strong>
                     </div>
                   );
                 })}

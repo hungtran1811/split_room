@@ -6,6 +6,7 @@ import { EmptyState } from "../shared/ui/EmptyState";
 import { MetricGrid } from "../shared/ui/MetricTile";
 import { MoneyRow } from "../shared/ui/MoneyRow";
 import { OverviewSection } from "../shared/ui/OverviewSection";
+import { ResponsiveMoney } from "../shared/ui/ResponsiveMoney";
 import { PageLoadingSkeleton } from "../shared/ui/Skeleton";
 import { useToast } from "../shared/ui/Toast";
 import { LockBanner, PageHeader } from "../shared/ui/PageHeader";
@@ -239,27 +240,27 @@ export function DashboardPage() {
           {
             key: "expense",
             label: "Tổng chi chung",
-            value: formatVND(expenseTotal),
+            value: <ResponsiveMoney amount={expenseTotal} />,
             hint: `${expenses.length} khoản`,
           },
           {
             key: "paid",
             label: "Đã chuyển",
-            value: formatVND(paymentsApplied),
+            value: <ResponsiveMoney amount={paymentsApplied} />,
             tone: "positive",
             hint: `${live.payments.length} giao dịch`,
           },
           {
             key: "remain",
             label: "Còn cần chuyển",
-            value: formatVND(remainingDebt),
+            value: <ResponsiveMoney amount={remainingDebt} />,
             tone: remainingDebt > 0 ? "danger" : "positive",
             hint: `${settlementPlan.length} giao dịch gợi ý`,
           },
           {
             key: "rent",
             label: "Tiền nhà",
-            value: rentDoc ? formatVND(rentTotal) : "Chưa có",
+            value: rentDoc ? <ResponsiveMoney amount={rentTotal} /> : "Chưa có",
             hint: rentDoc ? `Người trả: ${labelOf(rentPayerId)}` : "Chưa nhập",
             tone: rentDoc ? "neutral" : "warning",
           },
@@ -276,7 +277,7 @@ export function DashboardPage() {
                 myPayTotal + oldDebtTotal > 0 ? "money-due" : "money-neutral"
               }`}
             >
-              {formatVND(myPayTotal + oldDebtTotal)}
+              <ResponsiveMoney amount={myPayTotal + oldDebtTotal} />
             </span>
           </div>
           <div className="balance-strip__divider" aria-hidden="true" />
@@ -287,13 +288,13 @@ export function DashboardPage() {
                 myReceiveTotal > 0 ? "money-receive" : "money-neutral"
               }`}
             >
-              {formatVND(myReceiveTotal)}
+              <ResponsiveMoney amount={myReceiveTotal} />
             </span>
           </div>
         </div>
         {oldDebtTotal > 0 ? (
           <p className="balance-strip__hint">
-            Gồm nợ tháng trước {formatVND(oldDebtTotal)}
+            Gồm nợ tháng trước <ResponsiveMoney amount={oldDebtTotal} />
           </p>
         ) : null}
         <div className="balance-strip__actions btn-row">
@@ -345,7 +346,7 @@ export function DashboardPage() {
                     avatarLabel={labelOf(item.fromId)}
                     title={`${labelOf(item.fromId)} → ${labelOf(item.toId)}`}
                     subtitle={mine ? (iPay ? "Bạn cần chuyển" : "Bạn sẽ nhận") : undefined}
-                    amount={formatVND(item.amount)}
+                    amount={<ResponsiveMoney amount={item.amount} />}
                     tone={tone}
                     highlight={mine}
                   />
@@ -375,7 +376,7 @@ export function DashboardPage() {
                   title={member.name}
                   subtitle={label}
                   badge={isMe ? "Bạn" : undefined}
-                  amount={formatVND(Math.abs(member.value))}
+                  amount={<ResponsiveMoney amount={Math.abs(member.value)} />}
                   tone={tone}
                   highlight={isMe}
                   barPercent={(Math.abs(member.value) / maxAbsBalance) * 100}
@@ -403,7 +404,7 @@ export function DashboardPage() {
                 avatarLabel={labelOf(item.fromId)}
                 title={`${labelOf(item.fromId)} → ${labelOf(item.toId)}`}
                 badge={formatPeriodShort(item.period)}
-                amount={formatVND(item.amount)}
+                amount={<ResponsiveMoney amount={item.amount} />}
                 tone={item.fromId === myMemberId ? "due" : "neutral"}
                 highlight={item.fromId === myMemberId || item.toId === myMemberId}
               />
@@ -444,7 +445,7 @@ export function DashboardPage() {
                   avatarLabel={labelOf(expense.payerId || "")}
                   title={expense.note || "Khoản chi"}
                   subtitle={`${expense.date} · ${labelOf(expense.payerId || "")} trả`}
-                  amount={formatVND(expense.amount)}
+                  amount={<ResponsiveMoney amount={expense.amount} />}
                 />
               ))}
             </div>
@@ -479,8 +480,13 @@ export function DashboardPage() {
                     avatarLabel={labelOf(member.id)}
                     title={labelOf(member.id)}
                     badge={isPayer ? "Người trả" : member.id === myMemberId ? "Bạn" : undefined}
-                    subtitle={`Phần ${formatVND(share)} · đã ${formatVND(paid)}`}
-                    amount={due > 0 ? formatVND(due) : "Đủ"}
+                    subtitle={
+                      <>
+                        Phần <ResponsiveMoney amount={share} /> · đã{" "}
+                        <ResponsiveMoney amount={paid} />
+                      </>
+                    }
+                    amount={due > 0 ? <ResponsiveMoney amount={due} /> : "Đủ"}
                     tone={due > 0 ? "due" : "receive"}
                     highlight={member.id === myMemberId}
                   />

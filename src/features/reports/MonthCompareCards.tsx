@@ -1,5 +1,5 @@
-import { formatVND } from "../../shared/lib/format";
 import { MetricGrid } from "../../shared/ui/MetricTile";
+import { ResponsiveMoney } from "../../shared/ui/ResponsiveMoney";
 import type { MonthCompareResult } from "../../domain/report/insights";
 
 type MonthCompareCardsProps = {
@@ -29,19 +29,19 @@ export function MonthCompareCards({ compare }: MonthCompareCardsProps) {
           {
             key: "current",
             label: formatPeriodShort(compare.currentPeriod),
-            value: formatVND(compare.currentTotal),
+            value: <ResponsiveMoney amount={compare.currentTotal} />,
             hint: `${compare.currentCount} khoản`,
           },
           {
             key: "previous",
             label: formatPeriodShort(compare.previousPeriod),
-            value: formatVND(compare.previousTotal),
+            value: <ResponsiveMoney amount={compare.previousTotal} />,
             hint: `${compare.previousCount} khoản`,
           },
           {
             key: "delta",
             label: "Chênh lệch",
-            value: `${compare.deltaTotal > 0 ? "+" : ""}${formatVND(compare.deltaTotal)}`,
+            value: <ResponsiveMoney amount={compare.deltaTotal} showPositiveSign />,
             hint: deltaLabel,
             tone: deltaTone,
           },

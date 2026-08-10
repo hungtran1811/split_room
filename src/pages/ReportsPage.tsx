@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
-import { formatVND } from "../shared/lib/format";
 import { EmptyState } from "../shared/ui/EmptyState";
 import { MetricGrid } from "../shared/ui/MetricTile";
 import { MoneyRow } from "../shared/ui/MoneyRow";
 import { OverviewSection } from "../shared/ui/OverviewSection";
 import { PageHeader } from "../shared/ui/PageHeader";
+import { ResponsiveMoney } from "../shared/ui/ResponsiveMoney";
 import { PageLoadingSkeleton, SkeletonList } from "../shared/ui/Skeleton";
 import { useSession } from "../app/SessionContext";
 import { useLiveMonth } from "../hooks/useLiveMonth";
@@ -146,21 +146,26 @@ export function ReportsPage() {
             {
               key: "total",
               label: "Tổng chi tháng",
-              value: formatVND(monthTotal),
+              value: <ResponsiveMoney amount={monthTotal} />,
               hint: `${monthExpenses.length} khoản`,
             },
             {
               key: "prev",
               label: "Tháng trước",
-              value: prevLoading ? "…" : formatVND(monthCompare.previousTotal),
+              value: prevLoading ? "…" : <ResponsiveMoney amount={monthCompare.previousTotal} />,
               hint: prevLoading ? "…" : `${monthCompare.previousCount} khoản`,
             },
             {
               key: "delta",
               label: "Chênh lệch",
-              value: prevLoading
-                ? "…"
-                : `${monthCompare.deltaTotal > 0 ? "+" : ""}${formatVND(monthCompare.deltaTotal)}`,
+              value: prevLoading ? (
+                "…"
+              ) : (
+                <ResponsiveMoney
+                  amount={monthCompare.deltaTotal}
+                  showPositiveSign
+                />
+              ),
               hint: deltaHint,
               tone: deltaTone,
             },
@@ -198,7 +203,7 @@ export function ReportsPage() {
                 avatarLabel={labelOf(item.payerId)}
                 title={item.note || "Khoản chi"}
                 subtitle={`${item.date} · ${labelOf(item.payerId)} trả`}
-                amount={formatVND(item.amount)}
+                amount={<ResponsiveMoney amount={item.amount} />}
               />
             ))}
           </div>

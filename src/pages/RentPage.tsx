@@ -12,6 +12,7 @@ import { canEditRent } from "../core/roles";
 import { useMemberLabel } from "../hooks/useMemberLabel";
 import { MemberAvatar } from "../shared/ui/MemberAvatar";
 import { NicknameSheet } from "../shared/ui/NicknameSheet";
+import { ResponsiveMoney } from "../shared/ui/ResponsiveMoney";
 import {
   buildEqualShares,
   clampNonNegative,
@@ -100,8 +101,8 @@ function ProgressRing({ percent, size = 96, stroke = 9 }: { percent: number; siz
   const offset = circumference - (clamped / 100) * circumference;
 
   return (
-    <div className="progress-ring" style={{ width: size, height: size }}>
-      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+    <div className="progress-ring">
+      <svg viewBox={`0 0 ${size} ${size}`} aria-hidden="true" focusable="false">
         <circle className="progress-ring__track" cx={size / 2} cy={size / 2} r={radius} strokeWidth={stroke} fill="none" />
         <circle
           className="progress-ring__value"
@@ -289,15 +290,21 @@ export function RentPage() {
             <div className="metric-grid metric-grid--3">
               <div className="metric-tile">
                 <div className="metric-tile__label">Tổng</div>
-                <div className="metric-tile__value">{formatVND(total)}</div>
+                <div className="metric-tile__value">
+                  <ResponsiveMoney amount={total} />
+                </div>
               </div>
               <div className="metric-tile metric-tile--positive">
                 <div className="metric-tile__label">Đã thu</div>
-                <div className="metric-tile__value">{formatVND(collected)}</div>
+                <div className="metric-tile__value">
+                  <ResponsiveMoney amount={collected} />
+                </div>
               </div>
               <div className="metric-tile metric-tile--danger">
                 <div className="metric-tile__label">Thiếu</div>
-                <div className="metric-tile__value">{formatVND(totalDue)}</div>
+                <div className="metric-tile__value">
+                  <ResponsiveMoney amount={totalDue} />
+                </div>
               </div>
             </div>
           </div>
@@ -472,15 +479,21 @@ export function RentPage() {
           <div className="metric-grid metric-grid--3" style={{ marginTop: 16 }}>
             <div className="metric-tile metric-tile--positive">
               <div className="metric-tile__label">Đã thu từ mọi người</div>
-              <div className="metric-tile__value">{formatVND(collected)}</div>
+              <div className="metric-tile__value">
+                <ResponsiveMoney amount={collected} />
+              </div>
             </div>
             <div className="metric-tile metric-tile--warning">
               <div className="metric-tile__label">{labelOf(form.payerId)} đang gánh</div>
-              <div className="metric-tile__value">{formatVND(payerBurden)}</div>
+              <div className="metric-tile__value">
+                <ResponsiveMoney amount={payerBurden} />
+              </div>
             </div>
             <div className="metric-tile metric-tile--danger">
               <div className="metric-tile__label">Còn thiếu</div>
-              <div className="metric-tile__value">{formatVND(totalDue)}</div>
+              <div className="metric-tile__value">
+                <ResponsiveMoney amount={totalDue} />
+              </div>
             </div>
           </div>
 
@@ -491,30 +504,30 @@ export function RentPage() {
 
       <NicknameSheet open={nicknameOpen} onClose={() => setNicknameOpen(false)} />
 
-      <div className="rent-wizard-nav">
-        <div>
-          {step > 0 ? (
-            <Button variant="ghost" onClick={handleBack}>
-              Quay lại
+      <div
+        className={`rent-wizard-nav ${step === 2 && canEdit ? "rent-wizard-nav--final" : ""}`.trim()}
+      >
+        {step > 0 ? (
+          <Button variant="ghost" onClick={handleBack}>
+            Quay lại
+          </Button>
+        ) : (
+          <span className="rent-wizard-nav__spacer" aria-hidden="true" />
+        )}
+        {step < 2 ? (
+          <Button variant="primary" onClick={handleNext}>
+            Tiếp theo
+          </Button>
+        ) : canEdit ? (
+          <>
+            <Button variant="ghost" onClick={handleClearPaid}>
+              Clear đã chuyển
             </Button>
-          ) : null}
-        </div>
-        <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap", justifyContent: "flex-end" }}>
-          {step < 2 ? (
-            <Button variant="primary" onClick={handleNext}>
-              Tiếp theo
+            <Button variant="primary" onClick={() => void handleSave()} disabled={saving}>
+              {saving ? "Đang lưu..." : "Lưu"}
             </Button>
-          ) : canEdit ? (
-            <>
-              <Button variant="ghost" onClick={handleClearPaid}>
-                Clear đã chuyển
-              </Button>
-              <Button variant="primary" onClick={() => void handleSave()} disabled={saving}>
-                {saving ? "Đang lưu..." : "Lưu"}
-              </Button>
-            </>
-          ) : null}
-        </div>
+          </>
+        ) : null}
       </div>
     </div>
   );
