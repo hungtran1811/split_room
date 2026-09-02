@@ -11,7 +11,12 @@ import type { User } from "firebase/auth";
 import type { Unsubscribe } from "firebase/firestore";
 import { firebaseConfigured } from "../config/firebase";
 import { GROUP_ID } from "../config/constants";
-import { currentPeriod, periodStorageKey } from "../core/period";
+import {
+  comparePeriod,
+  currentPeriod,
+  periodStorageKey,
+  resolveActivePeriod,
+} from "../core/period";
 import type { MemberProfile } from "../core/roles";
 import type { PeriodDoc } from "../types/models";
 import {
@@ -48,7 +53,7 @@ const SessionContext = createContext<SessionContextValue | null>(null);
 function readStoredPeriod(): string {
   try {
     const raw = localStorage.getItem(periodStorageKey(GROUP_ID));
-    if (raw && /^\d{4}-\d{2}$/.test(raw)) return raw;
+    if (raw) return resolveActivePeriod(raw);
   } catch {
     // Ignore storage access failures.
   }
@@ -70,6 +75,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   const groupUnsubRef = useRef<Unsubscribe | null>(null);
   const periodTokenRef = useRef(0);
+  const manualPastPeriodRef = useRef(false);
+  const trackedCalendarPeriodRef = useRef(currentPeriod());
 
   const stopGroupSubscriptions = useCallback(() => {
     groupUnsubRef.current?.();
@@ -77,6 +84,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const setSelectedPeriod = useCallback((period: string) => {
+    manualPastPeriodRef.current = comparePeriod(period, currentPeriod()) < 0;
     setSelectedPeriodState(period);
     try {
       localStorage.setItem(periodStorageKey(GROUP_ID), period);
@@ -176,6 +184,40 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     void refreshPeriod();
   }, [refreshPeriod]);
+
+  useEffect(() => {
+    function syncCalendarPeriod() {
+      const now = currentPeriod();
+      if (now !== trackedCalendarPeriodRef.current) {
+        trackedCalendarPeriodRef.current = now;
+        manualPastPeriodRef.current = false;
+        if (comparePeriod(selectedPeriod, now) < 0) {
+          setSelectedPeriod(now);
+        }
+        return;
+      }
+      if (
+        !manualPastPeriodRef.current &&
+        comparePeriod(selectedPeriod, now) < 0
+      ) {
+        setSelectedPeriod(now);
+      }
+    }
+
+    syncCalendarPeriod();
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") syncCalendarPeriod();
+    };
+
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    const intervalId = window.setInterval(syncCalendarPeriod, 60_000);
+
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      window.clearInterval(intervalId);
+    };
+  }, [selectedPeriod, setSelectedPeriod]);
 
   const value: SessionContextValue = {
     user,

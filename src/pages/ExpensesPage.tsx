@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { formatVND } from "../shared/lib/format";
 import { Button } from "../shared/ui/Button";
 import { EmptyState } from "../shared/ui/EmptyState";
@@ -10,7 +10,13 @@ import { useSession } from "../app/SessionContext";
 import { useLiveMonth } from "../hooks/useLiveMonth";
 import { useMemberLabel } from "../hooks/useMemberLabel";
 import { canAddExpense, canDeleteExpense, canEditExpense } from "../core/roles";
-import { getMonthRange, lastDayOfPeriod } from "../core/period";
+import {
+  currentPeriod,
+  defaultViewDateForPeriod,
+  getMonthRange,
+  lastDayOfPeriod,
+  todayYmd,
+} from "../core/period";
 import type { ExpenseDoc } from "../types/models";
 import { removeExpense } from "../services/expense.service";
 import { collectRecentNotes } from "../features/expenses/quickEntry";
@@ -31,7 +37,32 @@ export function ExpensesPage() {
 
   const [sheetOpen, setSheetOpen] = useState(false);
   const [editingExpense, setEditingExpense] = useState<ExpenseDoc | null>(null);
-  const [dateFilter, setDateFilter] = useState("");
+  const [dateFilter, setDateFilter] = useState(() =>
+    defaultViewDateForPeriod(session.selectedPeriod),
+  );
+
+  useEffect(() => {
+    setDateFilter(defaultViewDateForPeriod(session.selectedPeriod));
+  }, [session.selectedPeriod]);
+
+  useEffect(() => {
+    function syncViewDate() {
+      if (session.selectedPeriod !== currentPeriod()) return;
+      setDateFilter(todayYmd());
+    }
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") syncViewDate();
+    };
+
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    const intervalId = window.setInterval(syncViewDate, 60_000);
+
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      window.clearInterval(intervalId);
+    };
+  }, [session.selectedPeriod]);
 
   const expenses = live.expenses as ExpenseDoc[];
 

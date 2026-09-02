@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
-import { shiftPeriod } from "../core/period";
+import { comparePeriod, currentPeriod, shiftPeriod } from "../core/period";
 import { isOwnerProfile } from "../core/roles";
 import { resolveMemberIdFromEmail } from "../config/members.map";
 import { logout } from "../services/auth.service";
@@ -91,6 +91,8 @@ export function AppShell() {
     resolveMemberIdFromEmail(session.user?.email) ||
     "";
   const myPhotoURL = String(session.memberProfile?.photoURL || "");
+  const canGoForward =
+    comparePeriod(session.selectedPeriod, currentPeriod()) < 0;
 
   async function handleLogout() {
     setProfileOpen(false);
@@ -141,7 +143,11 @@ export function AppShell() {
               type="button"
               className="period-chip__btn"
               aria-label="Tháng sau"
-              onClick={() => session.setSelectedPeriod(shiftPeriod(session.selectedPeriod, 1))}
+              disabled={!canGoForward}
+              onClick={() => {
+                if (!canGoForward) return;
+                session.setSelectedPeriod(shiftPeriod(session.selectedPeriod, 1));
+              }}
             >
               ›
             </button>

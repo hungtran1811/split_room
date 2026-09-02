@@ -7,7 +7,7 @@ import { useSession } from "../../app/SessionContext";
 import { ROSTER, ROSTER_IDS } from "../../config/roster";
 import { useMemberLabel } from "../../hooks/useMemberLabel";
 import { resolveMemberIdFromEmail } from "../../config/members.map";
-import { getMonthRange, lastDayOfPeriod } from "../../core/period";
+import { defaultExpenseDateForPeriod, getMonthRange, lastDayOfPeriod } from "../../core/period";
 import { parseVndInput } from "../../core/money";
 import { buildWholeEqualShares, toWholeVnd } from "../../domain/money/whole-vnd";
 import type { ExpenseDoc } from "../../types/models";
@@ -31,21 +31,9 @@ type ExpenseFormSheetProps = {
   noteSuggestions?: string[];
 };
 
-function todayYmd(): string {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-}
-
-function defaultDateForPeriod(period: string): string {
-  const today = todayYmd();
-  if (today.slice(0, 7) === period) return today;
-  const { start } = getMonthRange(period);
-  return start;
-}
-
 function buildEmptyForm(period: string, payerId: string): FormState {
   return {
-    date: defaultDateForPeriod(period),
+    date: defaultExpenseDateForPeriod(period),
     amount: "",
     payerId,
     note: "",
@@ -64,7 +52,7 @@ function formFromExpense(expense: ExpenseDoc, period: string, fallbackPayerId: s
         ) as string[]);
 
   return {
-    date: expense.date || defaultDateForPeriod(period),
+    date: expense.date || defaultExpenseDateForPeriod(period),
     amount: String(expense.amount || ""),
     payerId: expense.payerId || fallbackPayerId,
     note: expense.note || "",

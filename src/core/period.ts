@@ -23,9 +23,42 @@ export function lastDayOfPeriod(period: string): string {
   return `${year}-${String(month).padStart(2, "0")}-${day}`;
 }
 
+export function todayYmd(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(
+    now.getDate(),
+  ).padStart(2, "0")}`;
+}
+
 export function currentPeriod(): string {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+}
+
+export function comparePeriod(left: string, right: string): number {
+  return String(left).localeCompare(String(right));
+}
+
+export function isCurrentPeriod(period: string): boolean {
+  return period === currentPeriod();
+}
+
+/** Khi mở app, bỏ tháng cũ lưu trong localStorage và chuyển sang tháng hiện tại. */
+export function resolveActivePeriod(stored: string): string {
+  const fallback = currentPeriod();
+  if (!stored || !/^\d{4}-\d{2}$/.test(stored)) return fallback;
+  return comparePeriod(stored, fallback) < 0 ? fallback : stored;
+}
+
+/** Ngày mặc định khi thêm khoản chi: hôm nay nếu tháng hiện tại, ngày cuối tháng nếu xem tháng cũ. */
+export function defaultExpenseDateForPeriod(period: string): string {
+  if (isCurrentPeriod(period)) return todayYmd();
+  return lastDayOfPeriod(period);
+}
+
+/** Ngày mặc định khi lọc danh sách chi tiêu. */
+export function defaultViewDateForPeriod(period: string): string {
+  return defaultExpenseDateForPeriod(period);
 }
 
 export function shiftPeriod(period: string, delta: number): string {
