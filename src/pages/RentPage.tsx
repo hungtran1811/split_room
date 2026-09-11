@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { formatVND } from "../shared/lib/format";
 import { Button } from "../shared/ui/Button";
 import { LockBanner, PageHeader } from "../shared/ui/PageHeader";
@@ -14,6 +14,7 @@ import { MemberAvatar } from "../shared/ui/MemberAvatar";
 import { NicknameSheet } from "../shared/ui/NicknameSheet";
 import {
   buildEqualShares,
+  buildRentDraftFromPrevious,
   clampNonNegative,
   computeRentCosts,
   parseIntSafe,
@@ -21,7 +22,7 @@ import {
   sumValues,
 } from "../domain/rent/compute";
 import { clampPaidToShares, validateShares } from "../domain/rent/validate";
-import { upsertRentByPeriod } from "../services/rent.service";
+import { getLatestRentBefore, upsertRentByPeriod } from "../services/rent.service";
 import type { RentDoc } from "../types/models";
 
 type RentForm = {
@@ -68,11 +69,12 @@ function emptyForm(): RentForm {
   };
 }
 
-function hydrateForm(doc: RentDoc | null): RentForm {
+function hydrateForm(doc: RentDoc | null, options?: { clearNewElectric?: boolean }): RentForm {
   if (!doc) return emptyForm();
 
   const shares = (doc.shares as Record<string, number>) || {};
   const paid = (doc.paid as Record<string, number>) || {};
+  const clearNewElectric = Boolean(options?.clearNewElectric);
 
   return {
     payerId: doc.payerId || OWNER_MEMBER_ID,
@@ -82,7 +84,7 @@ function hydrateForm(doc: RentDoc | null): RentForm {
     headcount: String(doc.headcount ?? 0),
     waterUnitPrice: String(doc.water?.unitPrice ?? 0),
     electricOldKwh: String(doc.electric?.oldKwh ?? 0),
-    electricNewKwh: String(doc.electric?.newKwh ?? 0),
+    electricNewKwh: clearNewElectric ? "" : String(doc.electric?.newKwh ?? 0),
     electricUnitPrice: String(doc.electric?.unitPrice ?? 0),
     splitEqual: (doc.splitMode || "equal") === "equal",
     shares: Object.fromEntries(ROSTER_IDS.map((id) => [id, String(shares[id] ?? 0)])),
@@ -138,15 +140,73 @@ export function RentPage() {
   const [step, setStep] = useState<0 | 1 | 2>(0);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
+  const [prefillFromPeriod, setPrefillFromPeriod] = useState<string | null>(null);
+  const draftTokenRef = useRef(0);
+  const appliedDraftPeriodRef = useRef<string | null>(null);
 
   const canEdit = canEditRent(session.memberProfile) && !session.lockedSoft;
 
   useEffect(() => {
-    if (live.rentReady) {
-      setForm(hydrateForm(live.rent as RentDoc | null));
+    if (!live.rentReady) return;
+
+    const currentRent = live.rent as RentDoc | null;
+    if (currentRent) {
+      draftTokenRef.current += 1;
+      appliedDraftPeriodRef.current = null;
+      setPrefillFromPeriod(null);
+      setForm(hydrateForm(currentRent));
+      return;
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [live.rentReady, live.rent]);
+
+    if (!session.groupId) {
+      appliedDraftPeriodRef.current = null;
+      setPrefillFromPeriod(null);
+      setForm(emptyForm());
+      return;
+    }
+
+    // Đã prefill tháng này rồi thì không ghi đè khi người dùng đang nhập.
+    if (appliedDraftPeriodRef.current === session.selectedPeriod) {
+      return;
+    }
+
+    const token = ++draftTokenRef.current;
+    let cancelled = false;
+
+    async function loadPreviousDraft() {
+      try {
+        const previous = await getLatestRentBefore(
+          session.groupId as string,
+          session.selectedPeriod,
+        );
+        if (cancelled || token !== draftTokenRef.current) return;
+
+        const draft = buildRentDraftFromPrevious(previous as RentDoc | null);
+        appliedDraftPeriodRef.current = session.selectedPeriod;
+
+        if (!draft) {
+          setPrefillFromPeriod(null);
+          setForm(emptyForm());
+          return;
+        }
+
+        setPrefillFromPeriod(String(previous?.period || ""));
+        setForm(hydrateForm(draft as RentDoc, { clearNewElectric: true }));
+      } catch (error) {
+        console.warn("[splitroom] Không tải được tiền nhà tháng trước để prefill.", error);
+        if (cancelled || token !== draftTokenRef.current) return;
+        appliedDraftPeriodRef.current = session.selectedPeriod;
+        setPrefillFromPeriod(null);
+        setForm(emptyForm());
+      }
+    }
+
+    void loadPreviousDraft();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [live.rentReady, live.rent, session.groupId, session.selectedPeriod]);
 
   const items = {
     rent: parseVndInt(form.rent),
@@ -282,6 +342,13 @@ export function RentPage() {
         <div className="readonly-banner">Bạn không có quyền chỉnh sửa tiền nhà.</div>
       ) : null}
 
+      {prefillFromPeriod && !live.rent ? (
+        <div className="readonly-banner">
+          Đã nhớ thông tin từ tháng {prefillFromPeriod}. Điện mới tháng trước đã chuyển thành điện
+          cũ — hãy nhập điện mới rồi lưu.
+        </div>
+      ) : null}
+
       {showMetrics ? (
         <div className="rent-top">
           <ProgressRing percent={collectPercent} />
@@ -377,7 +444,13 @@ export function RentPage() {
             </div>
             <div className="form-field">
               <label className="form-label">Điện mới</label>
-              <input className="form-input" disabled={!canEdit} value={form.electricNewKwh} onChange={(e) => updateField("electricNewKwh", e.target.value)} />
+              <input
+                className="form-input"
+                disabled={!canEdit}
+                value={form.electricNewKwh}
+                placeholder={prefillFromPeriod && !live.rent ? "Nhập chỉ số mới" : undefined}
+                onChange={(e) => updateField("electricNewKwh", e.target.value)}
+              />
             </div>
             <div className="form-field">
               <label className="form-label">Giá điện / số</label>

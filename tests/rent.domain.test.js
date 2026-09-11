@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildEqualShares,
+  buildRentDraftFromPrevious,
   computeRentCosts,
   sanitizeRentPayload,
 } from "../src/domain/rent/compute.js";
@@ -37,6 +38,37 @@ describe("rent domain", () => {
       a: 100,
       b: 0,
     });
+  });
+
+  it("buildRentDraftFromPrevious carries fixed fields and rolls electric meter forward", () => {
+    const draft = buildRentDraftFromPrevious({
+      payerId: "hung",
+      items: { rent: 4000000, wifi: 150000, other: 50000 },
+      headcount: 4,
+      water: { unitPrice: 100000, mode: "perPerson" },
+      electric: { oldKwh: 11214, newKwh: 11289, unitPrice: 4000 },
+      splitMode: "equal",
+      shares: { hung: 100, an: 100 },
+      paid: { hung: 0, an: 100 },
+      note: "tháng trước",
+      createdBy: "admin-1",
+    });
+
+    expect(draft).toMatchObject({
+      payerId: "hung",
+      items: { rent: 4000000, wifi: 150000, other: 50000 },
+      headcount: 4,
+      water: { unitPrice: 100000, mode: "perPerson" },
+      electric: { oldKwh: 11289, newKwh: 0, unitPrice: 4000 },
+      splitMode: "equal",
+      paid: { hung: 0, an: 0 },
+      note: "",
+      createdBy: "",
+    });
+  });
+
+  it("buildRentDraftFromPrevious returns null without previous data", () => {
+    expect(buildRentDraftFromPrevious(null)).toBeNull();
   });
 
   it("sanitizeRentPayload preserves createdBy but strips legacy finalized metadata", () => {

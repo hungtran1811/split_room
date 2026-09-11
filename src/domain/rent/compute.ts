@@ -103,6 +103,55 @@ export type RentPayload = {
   createdAt?: unknown;
 };
 
+/**
+ * Prefill tiền nhà tháng mới từ tháng trước:
+ * giữ khoản cố định / giá / người trả / cách chia;
+ * điện mới tháng trước → điện cũ tháng này; điện mới để trống để nhập;
+ * phần đã chuyển reset về 0.
+ */
+export function buildRentDraftFromPrevious(
+  previous: RentPayload | null | undefined,
+): RentPayload | null {
+  if (!previous) return null;
+
+  const previousNewKwh = clampNonNegative(previous.electric?.newKwh || 0);
+
+  return {
+    payerId: String(previous.payerId || ""),
+    items: {
+      rent: clampNonNegative(previous.items?.rent || 0),
+      wifi: clampNonNegative(previous.items?.wifi || 0),
+      other: clampNonNegative(previous.items?.other || 0),
+    },
+    headcount: clampNonNegative(previous.headcount || 0),
+    water: {
+      mode: previous.water?.mode || "perPerson",
+      unitPrice: clampNonNegative(previous.water?.unitPrice || 0),
+    },
+    electric: {
+      oldKwh: previousNewKwh,
+      // Để 0 trong draft; UI sẽ để trống ô điện mới cho người dùng nhập.
+      newKwh: 0,
+      unitPrice: clampNonNegative(previous.electric?.unitPrice || 0),
+    },
+    splitMode: previous.splitMode === "custom" ? "custom" : "equal",
+    shares: Object.fromEntries(
+      Object.entries(previous.shares || {}).map(([memberId, amount]) => [
+        memberId,
+        clampNonNegative(amount),
+      ]),
+    ),
+    paid: Object.fromEntries(
+      Object.keys(previous.paid || previous.shares || {}).map((memberId) => [
+        memberId,
+        0,
+      ]),
+    ),
+    note: "",
+    createdBy: "",
+  };
+}
+
 export function sanitizeRentPayload(
   period: string,
   payload: RentPayload,
