@@ -4,6 +4,7 @@ import { Button } from "../shared/ui/Button";
 import { EmptyState } from "../shared/ui/EmptyState";
 import { LockBanner, PageHeader } from "../shared/ui/PageHeader";
 import { MetricGrid } from "../shared/ui/MetricTile";
+import { ResponsiveMoney } from "../shared/ui/ResponsiveMoney";
 import { PageLoadingSkeleton } from "../shared/ui/Skeleton";
 import { useToast } from "../shared/ui/Toast";
 import { useSession } from "../app/SessionContext";
@@ -137,12 +138,21 @@ export function ExpensesPage() {
       <MetricGrid
         columns={2}
         tiles={[
-          { label: "Chi tháng", value: formatVND(monthTotal), hint: `${expenses.length} khoản` },
+          {
+            label: "Chi tháng",
+            value: <ResponsiveMoney amount={monthTotal} />,
+            hint: `${expenses.length} khoản`,
+          },
           {
             label: "Đang lọc",
             value: dateFilter
-              ? formatVND(visibleExpenses.reduce((sum, item) => sum + Number(item.amount || 0), 0))
-              : formatVND(monthTotal),
+              ? <ResponsiveMoney
+                  amount={visibleExpenses.reduce(
+                    (sum, item) => sum + Number(item.amount || 0),
+                    0,
+                  )}
+                />
+              : <ResponsiveMoney amount={monthTotal} />,
             hint: dateFilter ? `${visibleExpenses.length} khoản • ${dateFilter}` : "Tất cả",
           },
         ]}
@@ -177,8 +187,13 @@ export function ExpensesPage() {
           ) : null}
         </div>
         {canAddNow ? (
-          <Button variant="primary" onClick={openCreateSheet}>
-            + Thêm khoản chi
+          <Button variant="primary" className="expense-toolbar__add" onClick={openCreateSheet}>
+            <span className="expense-toolbar__add-label expense-toolbar__add-label--full">
+              + Thêm khoản chi
+            </span>
+            <span className="expense-toolbar__add-label expense-toolbar__add-label--compact">
+              + Thêm
+            </span>
           </Button>
         ) : null}
       </div>

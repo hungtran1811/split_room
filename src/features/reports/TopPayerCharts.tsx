@@ -1,8 +1,9 @@
 import { chartColorOf } from "../../config/avatars";
-import { formatVND } from "../../shared/lib/format";
+import { formatCompactVND, formatVND } from "../../shared/lib/format";
 import { useMemberLabel } from "../../hooks/useMemberLabel";
 import type { TopPayerRow } from "../../domain/report/top-payers";
 import { MemberAvatar } from "../../shared/ui/MemberAvatar";
+import { ResponsiveMoney } from "../../shared/ui/ResponsiveMoney";
 
 type ChartProps = {
   rows: TopPayerRow[];
@@ -35,8 +36,13 @@ function DonutChart({ rows, total }: { rows: TopPayerRow[]; total: number }) {
   }
 
   return (
-    <div className="chart-donut">
-      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+    <div
+      className="chart-donut"
+      role="img"
+      aria-label={`Tổng ${formatVND(total)}`}
+      title={formatVND(total)}
+    >
+      <svg aria-hidden="true" width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
         <g transform={`rotate(-90 ${size / 2} ${size / 2})`}>
           {rows.map((row) => {
             const portion = row.total / total;
@@ -72,10 +78,19 @@ function DonutChart({ rows, total }: { rows: TopPayerRow[]; total: number }) {
           x="50%"
           y="58%"
           textAnchor="middle"
-          className="chart-donut__total-value"
+          className="chart-donut__total-value responsive-money__full"
           fill="currentColor"
         >
           {formatVND(total)}
+        </text>
+        <text
+          x="50%"
+          y="58%"
+          textAnchor="middle"
+          className="chart-donut__total-value responsive-money__compact"
+          fill="currentColor"
+        >
+          {formatCompactVND(total)}
         </text>
       </svg>
     </div>
@@ -130,6 +145,7 @@ export function TopPayerCharts({ rows, total, myMemberId }: ChartProps) {
       <ul className="chart-legend">
         {rows.map((row) => {
           const pct = total > 0 ? Math.round((row.total / total) * 100) : 0;
+          const rowLabel = `${labelOf(row.payerId)}${row.payerId === myMemberId ? " (Bạn)" : ""}`;
           return (
             <li key={row.payerId} className="chart-legend__item">
               <MemberAvatar memberId={row.payerId} size={28} />
@@ -139,14 +155,17 @@ export function TopPayerCharts({ rows, total, myMemberId }: ChartProps) {
                     className="chart-legend__swatch"
                     style={{ background: chartColorOf(row.payerId) }}
                   />
-                  {labelOf(row.payerId)}
-                  {row.payerId === myMemberId ? " (Bạn)" : ""}
+                  <span className="chart-legend__name-text" title={rowLabel}>
+                    {rowLabel}
+                  </span>
                 </div>
                 <div className="chart-legend__meta">
                   {row.count} khoản · {pct}%
                 </div>
               </div>
-              <strong className="chart-legend__amount">{formatVND(row.total)}</strong>
+              <strong className="chart-legend__amount">
+                <ResponsiveMoney amount={row.total} />
+              </strong>
             </li>
           );
         })}

@@ -282,7 +282,9 @@ export function AdminPage() {
                         size={44}
                       />
                       <div>
-                        <div className="admin-backup-card__name">{memberLabel(admin)}</div>
+                        <div className="admin-backup-card__name" title={memberLabel(admin)}>
+                          {memberLabel(admin)}
+                        </div>
                         <div className="admin-backup-card__meta">
                           {String(admin.email || "-")}
                           {admin.memberId ? ` · ${String(admin.memberId)}` : ""}
@@ -320,7 +322,9 @@ export function AdminPage() {
                         size={40}
                       />
                       <div>
-                        <div className="admin-member-card__name">{memberLabel(member)}</div>
+                        <div className="admin-member-card__name" title={memberLabel(member)}>
+                          {memberLabel(member)}
+                        </div>
                         <div className="admin-member-card__meta">
                           {String(member.email || "-")}
                           <br />
