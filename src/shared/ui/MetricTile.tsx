@@ -1,13 +1,13 @@
+import type { ReactNode } from "react";
+
 export type MetricTone = "neutral" | "positive" | "warning" | "danger";
 
 type MetricTileProps = {
   label: string;
-  value: ReactValue;
+  value: ReactNode;
   hint?: string;
   tone?: MetricTone;
 };
-
-type ReactValue = string | number;
 
 export function MetricTile({ label, value, hint, tone = "neutral" }: MetricTileProps) {
   return (

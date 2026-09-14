@@ -1,1 +1,1 @@
-export { formatVND } from "../../config/i18n";
+export { formatCompactVND, formatVND } from "../../config/i18n";

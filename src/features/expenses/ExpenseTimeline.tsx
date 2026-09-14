@@ -47,8 +47,13 @@ export function ExpenseRow({
         {debts.length > 0 ? (
           <div className="expense-row__debts">
             {visibleDebts.map((debt) => (
-              <span key={debt.id} className="expense-row__chip">
-                {debt.label} {formatVND(debt.amount)}
+              <span
+                key={debt.id}
+                className="expense-row__chip"
+                title={`${debt.label} ${formatVND(debt.amount)}`}
+              >
+                <span className="expense-row__chip-name">{debt.label}</span>
+                <span className="expense-row__chip-amount">{formatVND(debt.amount)}</span>
               </span>
             ))}
             {extra > 0 ? (

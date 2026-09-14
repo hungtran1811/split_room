@@ -1,8 +1,8 @@
 import { chartColorOf } from "../../config/avatars";
-import { formatVND } from "../../shared/lib/format";
 import { useMemberLabel } from "../../hooks/useMemberLabel";
 import { EmptyState } from "../../shared/ui/EmptyState";
 import { MemberAvatar } from "../../shared/ui/MemberAvatar";
+import { ResponsiveMoney } from "../../shared/ui/ResponsiveMoney";
 import type { RentCollectionInsight } from "../../domain/report/insights";
 
 type RentCollectionCardProps = {
@@ -29,12 +29,14 @@ export function RentCollectionCard({ insight, myMemberId }: RentCollectionCardPr
       <div className="rent-collection__summary">
         <div>
           <div className="rent-collection__label">Đã thu</div>
-          <div className="rent-collection__value money-receive">{formatVND(insight.collected)}</div>
+          <div className="rent-collection__value money-receive">
+            <ResponsiveMoney amount={insight.collected} />
+          </div>
         </div>
         <div>
           <div className="rent-collection__label">Còn thiếu</div>
           <div className={`rent-collection__value ${insight.remaining > 0 ? "money-due" : "money-receive"}`}>
-            {formatVND(insight.remaining)}
+            <ResponsiveMoney amount={insight.remaining} />
           </div>
         </div>
         <div>
@@ -55,6 +57,9 @@ export function RentCollectionCard({ insight, myMemberId }: RentCollectionCardPr
         {insight.rows.map((row) => {
           const isMe = row.memberId === myMemberId;
           const isPayer = row.memberId === insight.payerId;
+          const rowLabel = `${labelOf(row.memberId)}${isMe ? " (Bạn)" : ""}${
+            isPayer ? " · Người trả" : ""
+          }`;
           return (
             <li
               key={row.memberId}
@@ -67,12 +72,13 @@ export function RentCollectionCard({ insight, myMemberId }: RentCollectionCardPr
                     className="chart-legend__swatch"
                     style={{ background: chartColorOf(row.memberId) }}
                   />
-                  {labelOf(row.memberId)}
-                  {isMe ? " (Bạn)" : ""}
-                  {isPayer ? " · Người trả" : ""}
+                  <span className="rent-collection__name-text" title={rowLabel}>
+                    {rowLabel}
+                  </span>
                 </div>
                 <div className="rent-collection__meta">
-                  Phần {formatVND(row.share)} · đã {formatVND(row.paid)}
+                  Phần <ResponsiveMoney amount={row.share} /> · đã{" "}
+                  <ResponsiveMoney amount={row.paid} />
                 </div>
                 {!isPayer ? (
                   <div className="rent-collection__bar" aria-hidden="true">
@@ -86,7 +92,7 @@ export function RentCollectionCard({ insight, myMemberId }: RentCollectionCardPr
                 ) : null}
               </div>
               <strong className={row.due > 0 ? "money-due" : "money-receive"}>
-                {isPayer ? "—" : row.due > 0 ? formatVND(row.due) : "Đủ"}
+                {isPayer ? "—" : row.due > 0 ? <ResponsiveMoney amount={row.due} /> : "Đủ"}
               </strong>
             </li>
           );
