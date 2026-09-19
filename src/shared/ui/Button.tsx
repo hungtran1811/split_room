@@ -10,6 +10,9 @@ type ButtonProps = {
   className?: string;
   variant?: ButtonVariant;
   block?: boolean;
+  "aria-pressed"?: boolean;
+  "aria-expanded"?: boolean;
+  "aria-label"?: string;
 };
 
 export function Button({
@@ -20,12 +23,18 @@ export function Button({
   className = "",
   variant = "primary",
   block = false,
+  "aria-pressed": ariaPressed,
+  "aria-expanded": ariaExpanded,
+  "aria-label": ariaLabel,
 }: ButtonProps) {
   return (
     <button
       type={type}
       onClick={onClick}
       disabled={disabled}
+      aria-pressed={ariaPressed}
+      aria-expanded={ariaExpanded}
+      aria-label={ariaLabel}
       className={`btn btn--${variant} ${block ? "btn--block" : ""} ${className}`.trim()}
     >
       {children}

@@ -225,6 +225,33 @@ service cloud.firestore {
         && request.resource.data.fromId != request.resource.data.toId;
     }
 
+    function validCalendarEntryShape() {
+      return request.resource.data.keys().hasOnly([
+          "uid",
+          "title",
+          "description",
+          "location",
+          "startAt",
+          "endAt",
+          "createdAt",
+          "updatedAt"
+        ])
+        && request.resource.data.uid is string
+        && request.resource.data.uid.size() > 0
+        && request.resource.data.title is string
+        && request.resource.data.title.size() > 0
+        && request.resource.data.title.size() <= 120
+        && request.resource.data.description is string
+        && request.resource.data.description.size() <= 2000
+        && request.resource.data.location is string
+        && request.resource.data.location.size() <= 200
+        && request.resource.data.startAt is timestamp
+        && request.resource.data.endAt is timestamp
+        && request.resource.data.startAt < request.resource.data.endAt
+        && request.resource.data.createdAt is timestamp
+        && request.resource.data.updatedAt is timestamp;
+    }
+
     match /groups/{groupId} {
       allow read: if isGroupMember(groupId);
       allow create: if validBootstrapGroupCreate(groupId);
@@ -260,6 +287,23 @@ service cloud.firestore {
         allow read: if isGroupMember(groupId);
         allow create, update: if validNicknameWrite(groupId, memberId);
         allow delete: if isGroupMember(groupId);
+      }
+
+      match /calendarEntries/{entryId} {
+        allow read: if isGroupMember(groupId);
+
+        allow create: if isGroupMember(groupId)
+          && request.resource.data.uid == request.auth.uid
+          && validCalendarEntryShape();
+
+        allow update: if isGroupMember(groupId)
+          && resource.data.uid == request.auth.uid
+          && request.resource.data.uid == resource.data.uid
+          && request.resource.data.createdAt == resource.data.createdAt
+          && validCalendarEntryShape();
+
+        allow delete: if isGroupMember(groupId)
+          && resource.data.uid == request.auth.uid;
       }
 
       match /expenses/{expenseId} {

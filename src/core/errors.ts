@@ -1,8 +1,18 @@
 export function mapFirestoreError(error: unknown, fallbackMessage?: string): string {
   const code = String((error as { code?: string })?.code || "");
+  const message = String((error as { message?: string })?.message || "");
+  const combined = `${code} ${message}`.toLowerCase();
+
+  if (
+    combined.includes("blocked_by_client") ||
+    combined.includes("failed to fetch") ||
+    combined.includes("network-request-failed")
+  ) {
+    return "Trình duyệt đang chặn kết nối Firestore (thường do ad blocker). Hãy tắt chặn cho localhost và splitfam.netlify.app rồi thử lại.";
+  }
 
   if (code.includes("permission-denied")) {
-    return fallbackMessage || "Bạn không có quyền thực hiện thao tác này.";
+    return "Bạn không có quyền thực hiện thao tác này.";
   }
 
   if (code.includes("failed-precondition")) {

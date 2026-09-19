@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { shiftPeriod } from "../core/period";
 import { isOwnerProfile } from "../core/roles";
 import { resolveMemberIdFromEmail } from "../config/members.map";
@@ -42,6 +42,12 @@ const NAV_ITEMS = [
     icon: <path d="M4 19V5M4 19h16M8 17V10M12 17V7M16 17v-4" />,
   },
   {
+    id: "calendar",
+    to: "/calendar",
+    label: "Lịch",
+    icon: <path d="M7 3v2M17 3v2M4 8h16M5 5h14a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zM8 12h3v3H8z" />,
+  },
+  {
     id: "rent",
     to: "/rent",
     label: "Tiền nhà",
@@ -64,6 +70,8 @@ function currentUserLabel(session: ReturnType<typeof useSession>): string {
 export function AppShell() {
   const session = useSession();
   const navigate = useNavigate();
+  const location = useLocation();
+  const isCalendar = location.pathname === "/calendar";
   const { showToast } = useToast();
   const [profileOpen, setProfileOpen] = useState(false);
   const [avatarOpen, setAvatarOpen] = useState(false);
@@ -83,6 +91,11 @@ export function AppShell() {
     document.addEventListener("click", onDocumentClick);
     return () => document.removeEventListener("click", onDocumentClick);
   }, [profileOpen]);
+
+  useEffect(() => {
+    document.documentElement.classList.toggle("calendar-lock", isCalendar);
+    return () => document.documentElement.classList.remove("calendar-lock");
+  }, [isCalendar]);
 
   const label = currentUserLabel(session);
   const owner = isOwnerProfile(session.memberProfile);
@@ -120,36 +133,40 @@ export function AppShell() {
   }
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${isCalendar ? "app-shell--calendar" : ""}`.trim()}>
       <header className="app-header">
         <NavLink to="/dashboard" className="app-header__brand" aria-label="SplitRoom">
           <BrandLogo size={36} className="app-header__brand-logo" decorative />
         </NavLink>
 
         <div className="app-header__period">
-          <div className="period-chip">
-            <button
-              type="button"
-              className="period-chip__btn"
-              aria-label="Tháng trước"
-              onClick={() => session.setSelectedPeriod(shiftPeriod(session.selectedPeriod, -1))}
-            >
-              ‹
-            </button>
-            <span className="period-chip__label">{formatPeriodLabel(session.selectedPeriod)}</span>
-            <button
-              type="button"
-              className="period-chip__btn"
-              aria-label="Tháng sau"
-              onClick={() => session.setSelectedPeriod(shiftPeriod(session.selectedPeriod, 1))}
-            >
-              ›
-            </button>
-          </div>
+          {isCalendar ? (
+            <span className="period-chip__label">Lịch nhóm</span>
+          ) : (
+            <div className="period-chip">
+              <button
+                type="button"
+                className="period-chip__btn"
+                aria-label="Tháng trước"
+                onClick={() => session.setSelectedPeriod(shiftPeriod(session.selectedPeriod, -1))}
+              >
+                ‹
+              </button>
+              <span className="period-chip__label">{formatPeriodLabel(session.selectedPeriod)}</span>
+              <button
+                type="button"
+                className="period-chip__btn"
+                aria-label="Tháng sau"
+                onClick={() => session.setSelectedPeriod(shiftPeriod(session.selectedPeriod, 1))}
+              >
+                ›
+              </button>
+            </div>
+          )}
         </div>
 
         <div className="app-header__actions">
-          {session.lockedSoft ? <span className="lock-badge">Đã chốt</span> : null}
+          {!isCalendar && session.lockedSoft ? <span className="lock-badge">Đã chốt</span> : null}
           <NotificationBell />
           <div className="profile-menu" ref={profileRef}>
             <button

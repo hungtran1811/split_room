@@ -4,6 +4,7 @@ import "./styles/tokens.css";
 import "./styles/shell.css";
 import "./styles/auth.css";
 import "./styles/pages.css";
+import "./styles/calendar.css";
 import { App } from "./app/App";
 
 const rootElement = document.getElementById("root");

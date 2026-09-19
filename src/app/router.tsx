@@ -1,6 +1,7 @@
 import { HashRouter, Navigate, Outlet, Route, Routes } from "react-router-dom";
 import { firebaseConfigured } from "../config/firebase";
 import { AdminPage } from "../pages/AdminPage";
+import { CalendarPage } from "../pages/CalendarPage";
 import { DashboardPage } from "../pages/DashboardPage";
 import { ExpensesPage } from "../pages/ExpensesPage";
 import { LoginPage } from "../pages/LoginPage";
@@ -70,6 +71,7 @@ export function AppRouter() {
             <Route path="expenses" element={<ExpensesPage />} />
             <Route path="payments" element={<PaymentsPage />} />
             <Route path="reports" element={<ReportsPage />} />
+            <Route path="calendar" element={<CalendarPage />} />
             <Route path="rent" element={<RentPage />} />
             <Route path="admin" element={<AdminPage />} />
           </Route>

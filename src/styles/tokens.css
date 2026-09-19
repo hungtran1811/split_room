@@ -890,6 +890,27 @@ body.app-sheet-open .bottom-nav {
   .bottom-sheet__handle {
     display: none;
   }
+
+  .bottom-sheet--wide .bottom-sheet__panel {
+    width: min(calc(100vw - 24px), 1360px);
+    max-width: none;
+    max-height: min(92vh, 900px);
+  }
+}
+
+.bottom-sheet--wide .bottom-sheet__panel {
+  max-width: none;
+  background: var(--surface-0);
+}
+
+.bottom-sheet--wide .bottom-sheet__header {
+  padding: var(--space-4) var(--space-5) var(--space-3);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-1);
+}
+
+.bottom-sheet--wide .bottom-sheet__body {
+  padding: var(--space-4) var(--space-5) var(--space-5);
 }
 
 @keyframes sheet-in {
@@ -972,7 +993,7 @@ body.app-sheet-open .bottom-nav {
 .confirm-dialog {
   position: fixed;
   inset: 0;
-  z-index: 80;
+  z-index: 1200;
   display: grid;
   place-items: center;
   padding: var(--space-5);

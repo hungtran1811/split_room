@@ -561,6 +561,131 @@ describe("firestore rules", () => {
     );
   });
 
+  it("lets group members read calendar entries and write only their own", async () => {
+    const memberDb = authenticatedDb(MEMBER_UID);
+    const ownerDb = authenticatedDb(OWNER_UID);
+    const outsiderDb = authenticatedDb(OUTSIDER_UID);
+    const start = new Date("2026-09-14T08:00:00+07:00");
+    const end = new Date("2026-09-14T10:00:00+07:00");
+
+    const payload = {
+      uid: MEMBER_UID,
+      title: "Di hoc",
+      description: "",
+      location: "Nha",
+      startAt: start,
+      endAt: end,
+      createdAt: start,
+      updatedAt: start,
+    };
+
+    await assertSucceeds(
+      memberDb.doc(`groups/${GROUP_ID}/calendarEntries/cal-member`).set(payload),
+    );
+
+    await assertSucceeds(
+      memberDb.doc(`groups/${GROUP_ID}/calendarEntries/cal-member`).get(),
+    );
+
+    await assertSucceeds(
+      ownerDb.doc(`groups/${GROUP_ID}/calendarEntries/cal-member`).get(),
+    );
+
+    await assertFails(
+      ownerDb.doc(`groups/${GROUP_ID}/calendarEntries/cal-member`).update({
+        title: "Hack",
+        updatedAt: end,
+      }),
+    );
+
+    await assertFails(
+      ownerDb.doc(`groups/${GROUP_ID}/calendarEntries/cal-member`).delete(),
+    );
+
+    await assertFails(
+      memberDb.doc(`groups/${GROUP_ID}/calendarEntries/cal-other`).set({
+        ...payload,
+        uid: OWNER_UID,
+      }),
+    );
+
+    await assertFails(
+      outsiderDb.doc(`groups/${GROUP_ID}/calendarEntries/cal-member`).get(),
+    );
+
+    await assertFails(
+      outsiderDb.doc(`groups/${GROUP_ID}/calendarEntries/cal-out`).set(payload),
+    );
+
+    await assertSucceeds(
+      memberDb.doc(`groups/${GROUP_ID}/calendarEntries/cal-member`).update({
+        title: "Di hoc 2",
+        description: "",
+        location: "Nha",
+        startAt: start,
+        endAt: end,
+        uid: MEMBER_UID,
+        createdAt: start,
+        updatedAt: end,
+      }),
+    );
+
+    await assertFails(
+      memberDb.doc(`groups/${GROUP_ID}/calendarEntries/cal-member`).update({
+        title: "Di hoc 3",
+        description: "",
+        location: "Nha",
+        startAt: start,
+        endAt: end,
+        uid: OWNER_UID,
+        createdAt: start,
+        updatedAt: end,
+      }),
+    );
+  });
+
+  it("blocks calendar writes from removed members", async () => {
+    const removedUid = "removed-uid";
+    await seedGroup(GROUP_ID, [
+      memberPayload(OWNER_UID, "owner", "owner"),
+      memberPayload(ADMIN_UID, "admin", "admin"),
+      memberPayload(MEMBER_UID, "member", "member"),
+      memberPayload(removedUid, "member", "removed"),
+    ]);
+
+    const start = new Date("2026-09-14T08:00:00+07:00");
+    const end = new Date("2026-09-14T10:00:00+07:00");
+    const payload = {
+      uid: removedUid,
+      title: "Cu",
+      description: "",
+      location: "",
+      startAt: start,
+      endAt: end,
+      createdAt: start,
+      updatedAt: start,
+    };
+
+    await assertSucceeds(
+      authenticatedDb(removedUid).doc(`groups/${GROUP_ID}/calendarEntries/cal-removed`).set(payload),
+    );
+
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await context.firestore().doc(`groups/${GROUP_ID}/members/${removedUid}`).delete();
+    });
+
+    await assertFails(
+      authenticatedDb(removedUid).doc(`groups/${GROUP_ID}/calendarEntries/cal-removed`).update({
+        ...payload,
+        title: "Moi",
+      }),
+    );
+
+    await assertFails(
+      authenticatedDb(removedUid).doc(`groups/${GROUP_ID}/calendarEntries/cal-removed`).get(),
+    );
+  });
+
   it("keeps the seeded membership roles unchanged after denied writes", async () => {
     const adminDb = authenticatedDb(ADMIN_UID);
     await assertFails(
