@@ -21,7 +21,9 @@ import { splitEntryAcrossDays } from "../src/domain/calendar/segments";
 import { assignOverlapColumns } from "../src/domain/calendar/overlap";
 import { freeSlotsForMemberDay, isFreeAllDay, mergeBusyIntervals } from "../src/domain/calendar/freeSlots";
 import { buildCopiedEntries, shiftEntryByDays, stableCopyId } from "../src/domain/calendar/copyWeek";
+import { expandRepeatOccurrences } from "../src/domain/calendar/repeat";
 import { hasSelfOverlap, validateCalendarEntryInput } from "../src/domain/calendar/validate";
+import { visibleHourRange, countEntriesOutsideCoreHours } from "../src/domain/calendar/visibleHours";
 
 function entry(partial) {
   return {
@@ -229,5 +231,149 @@ describe("calendar copy helpers", () => {
     expect(copies[0].destId).toBe("keep__2026-09-21");
     expect(copies[0].sourceId).toBe("keep");
     expect(ymdInTz(copies[0].entry.startAt)).toBe("2026-09-23");
+  });
+});
+
+describe("calendar repeat", () => {
+  it("counts from the first recording and keeps duration", () => {
+    const startAt = vnWallTimeToUtcMs(2026, 9, 19, 18, 0);
+    const endAt = vnWallTimeToUtcMs(2026, 9, 19, 21, 0);
+    const daily = expandRepeatOccurrences({ startAt, endAt }, "day", 4);
+    expect(daily.map((item) => ymdInTz(item.startAt))).toEqual([
+      "2026-09-19",
+      "2026-09-20",
+      "2026-09-21",
+      "2026-09-22",
+    ]);
+    expect(daily.every((item) => item.endAt - item.startAt === 3 * 60 * 60 * 1000)).toBe(true);
+
+    const weekly = expandRepeatOccurrences({ startAt, endAt }, "week", 3);
+    expect(weekly.map((item) => ymdInTz(item.startAt))).toEqual([
+      "2026-09-19",
+      "2026-09-26",
+      "2026-10-03",
+    ]);
+  });
+
+  it("does not expand when frequency is none", () => {
+    const startAt = vnWallTimeToUtcMs(2026, 9, 19, 18, 0);
+    const endAt = vnWallTimeToUtcMs(2026, 9, 19, 19, 0);
+    expect(expandRepeatOccurrences({ startAt, endAt }, "none", 5)).toHaveLength(1);
+  });
+});
+
+describe("calendar visible hours", () => {
+  const week = weekBounds("2026-09-14");
+
+  it("defaults to 6:00–22:00 when the week is empty", () => {
+    expect(
+      visibleHourRange({
+        weekStartMs: week.startMs,
+        weekEndMs: week.endMs,
+        entries: [],
+      }),
+    ).toEqual({ startHour: 6, endHour: 22 });
+  });
+
+  it("does not expand for events entirely inside 6:00–22:00", () => {
+    expect(
+      visibleHourRange({
+        weekStartMs: week.startMs,
+        weekEndMs: week.endMs,
+        entries: [
+          {
+            startAt: vnWallTimeToUtcMs(2026, 9, 16, 6, 0),
+            endAt: vnWallTimeToUtcMs(2026, 9, 16, 22, 0),
+          },
+        ],
+      }),
+    ).toEqual({ startHour: 6, endHour: 22 });
+  });
+
+  it("expands earlier when an event starts before 6:00", () => {
+    expect(
+      visibleHourRange({
+        weekStartMs: week.startMs,
+        weekEndMs: week.endMs,
+        entries: [
+          {
+            startAt: vnWallTimeToUtcMs(2026, 9, 16, 2, 0),
+            endAt: vnWallTimeToUtcMs(2026, 9, 16, 3, 30),
+          },
+        ],
+      }),
+    ).toEqual({ startHour: 2, endHour: 22 });
+  });
+
+  it("expands later when an event continues past 22:00", () => {
+    expect(
+      visibleHourRange({
+        weekStartMs: week.startMs,
+        weekEndMs: week.endMs,
+        entries: [
+          {
+            startAt: vnWallTimeToUtcMs(2026, 9, 16, 21, 0),
+            endAt: vnWallTimeToUtcMs(2026, 9, 16, 23, 0),
+          },
+        ],
+      }),
+    ).toEqual({ startHour: 6, endHour: 23 });
+  });
+
+  it("expands both ends for an overnight event", () => {
+    expect(
+      visibleHourRange({
+        weekStartMs: week.startMs,
+        weekEndMs: week.endMs,
+        entries: [
+          {
+            startAt: vnWallTimeToUtcMs(2026, 9, 16, 23, 0),
+            endAt: vnWallTimeToUtcMs(2026, 9, 17, 1, 0),
+          },
+        ],
+      }),
+    ).toEqual({ startHour: 0, endHour: 24 });
+  });
+
+  it("expands for current time outside the default window", () => {
+    expect(
+      visibleHourRange({
+        weekStartMs: week.startMs,
+        weekEndMs: week.endMs,
+        entries: [],
+        nowMs: vnWallTimeToUtcMs(2026, 9, 16, 5, 15),
+      }).startHour,
+    ).toBe(5);
+    expect(
+      visibleHourRange({
+        weekStartMs: week.startMs,
+        weekEndMs: week.endMs,
+        entries: [],
+        nowMs: vnWallTimeToUtcMs(2026, 9, 16, 22, 30),
+      }).endHour,
+    ).toBe(23);
+  });
+
+  it("counts entries that sit outside 6:00–22:00", () => {
+    expect(
+      countEntriesOutsideCoreHours({
+        weekStartMs: week.startMs,
+        weekEndMs: week.endMs,
+        entries: [
+          {
+            startAt: vnWallTimeToUtcMs(2026, 9, 16, 8, 0),
+            endAt: vnWallTimeToUtcMs(2026, 9, 16, 9, 0),
+          },
+          {
+            startAt: vnWallTimeToUtcMs(2026, 9, 16, 2, 0),
+            endAt: vnWallTimeToUtcMs(2026, 9, 16, 3, 0),
+          },
+          {
+            startAt: vnWallTimeToUtcMs(2026, 9, 16, 21, 0),
+            endAt: vnWallTimeToUtcMs(2026, 9, 16, 23, 0),
+          },
+        ],
+      }),
+    ).toBe(2);
   });
 });

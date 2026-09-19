@@ -53,8 +53,14 @@ export function freeSlotsForMemberDay(
   uid: string,
   day: WeekDay,
 ): FreeSlot[] {
+  return freeSlotsFromEntries(
+    entries.filter((entry) => entry.uid === uid),
+    day,
+  );
+}
+
+export function freeSlotsFromEntries(entries: CalendarEntry[], day: WeekDay): FreeSlot[] {
   const busy = entries
-    .filter((entry) => entry.uid === uid)
     .map((entry) => clipToDay(entry, day))
     .filter((interval): interval is Interval => Boolean(interval));
   return invertBusyToFree(day, busy);

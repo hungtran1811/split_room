@@ -92,6 +92,11 @@ export function AppShell() {
     return () => document.removeEventListener("click", onDocumentClick);
   }, [profileOpen]);
 
+  useEffect(() => {
+    document.documentElement.classList.toggle("calendar-lock", isCalendar);
+    return () => document.documentElement.classList.remove("calendar-lock");
+  }, [isCalendar]);
+
   const label = currentUserLabel(session);
   const owner = isOwnerProfile(session.memberProfile);
   const myMemberId =

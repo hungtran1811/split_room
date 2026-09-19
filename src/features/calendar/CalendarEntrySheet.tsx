@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { BottomSheet } from "../../shared/ui/BottomSheet";
 import { Button } from "../../shared/ui/Button";
 import { ConfirmDialog } from "../../shared/ui/ConfirmDialog";
@@ -10,17 +10,30 @@ import {
   validateCalendarEntryInput,
 } from "../../domain/calendar/validate";
 import {
+  addDaysYmd,
+  mondayIndexOfYmd,
   msToVnDateTimeLocal,
+  parseYmd,
   todayYmdVn,
   utcMsToVnParts,
   vnDateTimeLocalToMs,
+  WEEKDAY_LONG_VI,
+  WEEKDAY_SHORT_VI,
+  ymdInTz,
 } from "../../domain/calendar/tz";
+import {
+  clampRepeatCount,
+  expandRepeatOccurrences,
+  REPEAT_MAX,
+  type RepeatFreq,
+} from "../../domain/calendar/repeat";
 import type { CalendarEntry } from "../../domain/calendar/types";
 import {
-  createCalendarEntry,
+  createCalendarEntries,
   deleteCalendarEntry,
   updateCalendarEntry,
 } from "../../services/calendar.service";
+import { formatViDateShort } from "../../shared/lib/date";
 import { useToast } from "../../shared/ui/Toast";
 
 type CalendarEntrySheetProps = {
@@ -30,35 +43,86 @@ type CalendarEntrySheetProps = {
   uid: string;
   weekEntries: CalendarEntry[];
   selectedYmd: string;
+  draftStartLocal?: string | null;
+  draftEndLocal?: string | null;
   entry?: CalendarEntry | null;
   canEdit: boolean;
+  onSaved?: (ymd: string) => void;
 };
 
-function roundNextHalfHourLocal(ymd: string, now: number): { start: string; end: string } {
-  const today = todayYmdVn(now);
-  if (ymd !== today) {
-    return { start: `${ymd}T08:00`, end: `${ymd}T09:00` };
+function pad2(value: number): string {
+  return String(value).padStart(2, "0");
+}
+
+function splitLocal(local: string): { ymd: string; hm: string } {
+  const [ymd = "", time = "08:00"] = String(local).split("T");
+  return { ymd, hm: normalizeHm(time) };
+}
+
+function normalizeHm(value: string): string {
+  const match = /(\d{1,2}):(\d{2})/.exec(String(value || ""));
+  if (!match) return "08:00";
+  return `${pad2(Math.min(23, Number(match[1])))}:${match[2]}`;
+}
+
+function combineLocal(ymd: string, hm: string): string {
+  return `${ymd}T${hm}`;
+}
+
+function addHoursHm(hm: string, hours: number): string {
+  const [hourText, minuteText] = hm.split(":");
+  const total = Number(hourText) * 60 + Number(minuteText) + hours * 60;
+  const wrapped = ((total % (24 * 60)) + 24 * 60) % (24 * 60);
+  return `${pad2(Math.floor(wrapped / 60))}:${pad2(wrapped % 60)}`;
+}
+
+function endDateFor(startYmd: string, startHm: string, endHm: string): string {
+  return endHm > startHm ? startYmd : addDaysYmd(startYmd, 1);
+}
+
+function durationLabel(startMs: number, endMs: number): string {
+  const minutes = Math.max(0, Math.round((endMs - startMs) / 60000));
+  if (minutes < 60) return `${minutes} phút`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest ? `${hours} giờ ${rest} phút` : `${hours} giờ`;
+}
+
+function dateHeadline(ymd: string) {
+  const parts = parseYmd(ymd);
+  if (!parts) {
+    return { short: "—", long: "Chọn ngày", day: "—", monthYear: "" };
   }
-  const parts = utcMsToVnParts(now);
+  const index = mondayIndexOfYmd(ymd);
+  return {
+    short: WEEKDAY_SHORT_VI[index],
+    long: WEEKDAY_LONG_VI[index],
+    day: String(parts.day),
+    monthYear: `${parts.day} tháng ${parts.month}, ${parts.year}`,
+  };
+}
+
+function defaultRange(
+  ymd: string,
+  draftStartLocal: string | null | undefined,
+  draftEndLocal?: string | null,
+): { ymd: string; startHm: string; endHm: string } {
+  if (draftStartLocal) {
+    const start = splitLocal(draftStartLocal);
+    const end = draftEndLocal ? splitLocal(draftEndLocal) : { ymd: start.ymd, hm: addHoursHm(start.hm, 1) };
+    return { ymd: start.ymd, startHm: start.hm, endHm: end.hm };
+  }
+  const parts = utcMsToVnParts(Date.now());
+  const today = `${parts.year}-${pad2(parts.month)}-${pad2(parts.day)}`;
+  if (ymd !== today) {
+    return { ymd, startHm: "08:00", endHm: "09:00" };
+  }
   let hour = parts.hour;
   let minute = parts.minute < 30 ? 30 : 0;
   if (parts.minute >= 30) hour += 1;
-  if (hour >= 24) {
-    return { start: `${ymd}T23:00`, end: `${ymd}T23:59` };
-  }
-  const startHour = hour;
-  const startMin = minute;
-  let endHour = startMin === 30 ? startHour + 1 : startHour;
-  let endMin = startMin === 30 ? 0 : 30;
-  if (endHour >= 24) {
-    endHour = 23;
-    endMin = 59;
-  }
-  const pad = (value: number) => String(value).padStart(2, "0");
-  return {
-    start: `${ymd}T${pad(startHour)}:${pad(startMin)}`,
-    end: `${ymd}T${pad(endHour)}:${pad(endMin)}`,
-  };
+  if (hour >= 24) return { ymd, startHm: "23:00", endHm: "23:59" };
+  const startHm = `${pad2(hour)}:${pad2(minute)}`;
+  return { ymd, startHm, endHm: addHoursHm(startHm, 1) };
 }
 
 export function CalendarEntrySheet({
@@ -68,58 +132,105 @@ export function CalendarEntrySheet({
   uid,
   weekEntries,
   selectedYmd,
+  draftStartLocal,
+  draftEndLocal,
   entry,
   canEdit,
+  onSaved,
 }: CalendarEntrySheetProps) {
   const { showToast } = useToast();
   const isOwner = Boolean(entry && entry.uid === uid);
   const editable = canEdit && (!entry || isOwner);
   const [title, setTitle] = useState("");
-  const [startLocal, setStartLocal] = useState("");
-  const [endLocal, setEndLocal] = useState("");
+  const [dateYmd, setDateYmd] = useState(selectedYmd);
+  const [startHm, setStartHm] = useState("08:00");
+  const [endHm, setEndHm] = useState("09:00");
   const [description, setDescription] = useState("");
   const [location, setLocation] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [repeatFreq, setRepeatFreq] = useState<RepeatFreq>("none");
+  const [repeatCount, setRepeatCount] = useState(4);
 
   useEffect(() => {
     if (!open) return;
     if (entry) {
+      const start = splitLocal(msToVnDateTimeLocal(entry.startAt));
+      const end = splitLocal(msToVnDateTimeLocal(entry.endAt));
       setTitle(entry.title);
-      setStartLocal(msToVnDateTimeLocal(entry.startAt));
-      setEndLocal(msToVnDateTimeLocal(entry.endAt));
+      setDateYmd(start.ymd);
+      setStartHm(start.hm);
+      setEndHm(end.hm);
       setDescription(entry.description);
       setLocation(entry.location);
     } else {
-      const range = roundNextHalfHourLocal(selectedYmd, Date.now());
+      const range = defaultRange(selectedYmd, draftStartLocal, draftEndLocal);
       setTitle("");
-      setStartLocal(range.start);
-      setEndLocal(range.end);
+      setDateYmd(range.ymd);
+      setStartHm(range.startHm);
+      setEndHm(range.endHm);
       setDescription("");
       setLocation("");
+      setRepeatFreq("none");
+      setRepeatCount(4);
     }
     setError("");
-  }, [open, entry, selectedYmd]);
+  }, [open, entry, selectedYmd, draftStartLocal, draftEndLocal]);
 
+  const endYmd = endDateFor(dateYmd, startHm, endHm);
+  const startLocal = combineLocal(dateYmd, startHm);
+  const endLocal = combineLocal(endYmd, endHm);
   const startAt = vnDateTimeLocalToMs(startLocal);
   const endAt = vnDateTimeLocalToMs(endLocal);
+  const overnight = endYmd !== dateYmd;
+  const occurrences = useMemo(() => {
+    if (startAt === null || endAt === null || endAt <= startAt) return [];
+    return expandRepeatOccurrences(
+      { startAt, endAt },
+      entry ? "none" : repeatFreq,
+      entry ? 1 : repeatCount,
+    );
+  }, [startAt, endAt, repeatFreq, repeatCount, entry]);
+
   const overlap =
-    startAt !== null &&
-    endAt !== null &&
-    hasSelfOverlap(weekEntries, uid, { startAt, endAt }, entry?.id);
+    occurrences.length > 0 &&
+    occurrences.some((item) => hasSelfOverlap(weekEntries, uid, item, entry?.id));
+
+  const repeatPreview = useMemo(() => {
+    if (entry || repeatFreq === "none" || occurrences.length < 2) return "";
+    const dates = occurrences.map((item) => formatViDateShort(ymdInTz(item.startAt)));
+    const shown = dates.slice(0, 4).join(" · ");
+    const extra = dates.length > 4 ? ` · +${dates.length - 4}` : "";
+    const kind = repeatFreq === "day" ? "mỗi ngày" : "mỗi tuần";
+    return `${occurrences.length} lần ${kind}: ${shown}${extra}`;
+  }, [entry, occurrences, repeatFreq]);
+
+  const headline = dateHeadline(dateYmd);
+  const isToday = dateYmd === todayYmdVn();
+  const summary = useMemo(() => {
+    if (startAt === null || endAt === null || endAt <= startAt) {
+      return overnight ? "Kết thúc hôm sau" : "";
+    }
+    const length = durationLabel(startAt, endAt);
+    return overnight ? `Qua đêm · ${length}` : length;
+  }, [startAt, endAt, overnight]);
+
+  function handleStartTimeChange(value: string) {
+    const next = normalizeHm(value);
+    setStartHm(next);
+    if (endHm <= next) setEndHm(addHoursHm(next, 1));
+  }
 
   async function handleSave() {
     if (!editable) return;
     setError("");
-    const startMs = vnDateTimeLocalToMs(startLocal);
-    const endMs = vnDateTimeLocalToMs(endLocal);
     const checked = validateCalendarEntryInput({
       title,
       description,
       location,
-      startAt: startMs ?? NaN,
-      endAt: endMs ?? NaN,
+      startAt: startAt ?? NaN,
+      endAt: endAt ?? NaN,
     });
     if (!checked.ok) {
       setError(checked.error);
@@ -132,9 +243,27 @@ export function CalendarEntrySheet({
         await updateCalendarEntry(groupId, entry.id, checked);
         showToast({ title: "Đã lưu", message: "Đã cập nhật lịch bận.", variant: "success" });
       } else {
-        await createCalendarEntry(groupId, uid, checked);
-        showToast({ title: "Đã lưu", message: "Đã thêm lịch bận.", variant: "success" });
+        const inputs = occurrences.map((item) => ({
+          ...checked,
+          startAt: item.startAt,
+          endAt: item.endAt,
+        }));
+        const result = await createCalendarEntries(groupId, uid, inputs);
+        const extra = result.failed ? `, lỗi ${result.failed}` : "";
+        showToast({
+          title: "Đã lưu",
+          message:
+            result.added === 1
+              ? "Đã thêm lịch bận."
+              : `Đã thêm ${result.added} lịch bận${extra}.`,
+          variant: result.failed ? "danger" : "success",
+        });
+        if (!result.added) {
+          setError("Không lưu được lịch.");
+          return;
+        }
       }
+      onSaved?.(dateYmd);
       onClose();
     } catch (err) {
       setError((err as { message?: string }).message || "Không lưu được lịch.");
@@ -176,84 +305,156 @@ export function CalendarEntrySheet({
                 <span />
               )}
               <Button variant="primary" onClick={() => void handleSave()} disabled={saving}>
-                {saving ? "Đang lưu..." : "Lưu"}
+                {saving
+                  ? "Đang lưu..."
+                  : !entry && occurrences.length > 1
+                    ? `Lưu ${occurrences.length} lần`
+                    : "Lưu"}
               </Button>
             </div>
           ) : undefined
         }
       >
-        <div className="form-grid">
-          <div className="form-field">
-            <label className="form-label" htmlFor="calTitle">
-              Tiêu đề
+        <div className="cal-form">
+          <input
+            id="calTitle"
+            className="cal-form__title"
+            placeholder="Thêm tiêu đề"
+            value={title}
+            maxLength={TITLE_MAX}
+            disabled={!editable}
+            onChange={(event) => setTitle(event.target.value)}
+          />
+
+          <div className="cal-when">
+            <label className={`cal-when__date ${isToday ? "is-today" : ""}`.trim()}>
+              <span className="cal-when__tile" aria-hidden="true">
+                <small>{headline.short}</small>
+                <strong>{headline.day}</strong>
+              </span>
+              <span className="cal-when__date-copy">
+                <strong>{headline.long}</strong>
+                <span>{headline.monthYear}</span>
+                <span className="cal-when__date-hint">{editable ? "Chạm để đổi ngày" : "Ngày bắt đầu"}</span>
+              </span>
+              <input
+                type="date"
+                className="cal-when__date-input"
+                value={dateYmd}
+                disabled={!editable}
+                aria-label="Ngày"
+                onChange={(event) => setDateYmd(event.target.value)}
+              />
             </label>
-            <input
-              id="calTitle"
-              className="form-input"
-              value={title}
-              maxLength={TITLE_MAX}
-              disabled={!editable}
-              onChange={(event) => setTitle(event.target.value)}
-            />
+
+            <div className="cal-when__times">
+              <label className="cal-when__time">
+                <span>Từ</span>
+                <input
+                  type="time"
+                  step={60}
+                  value={startHm}
+                  disabled={!editable}
+                  onChange={(event) => handleStartTimeChange(event.target.value)}
+                />
+              </label>
+              <span className="cal-when__dash" aria-hidden="true">
+                <span />
+              </span>
+              <label className="cal-when__time">
+                <span>Đến</span>
+                <input
+                  type="time"
+                  step={60}
+                  value={endHm}
+                  disabled={!editable}
+                  onChange={(event) => setEndHm(normalizeHm(event.target.value))}
+                />
+              </label>
+            </div>
+
+            {summary || overnight ? (
+              <div className="cal-when__meta">
+                {summary ? <p className="cal-when__summary">{summary}</p> : null}
+                {overnight ? (
+                  <p className="cal-when__overnight">Qua đêm · {formatViDateShort(endYmd)}</p>
+                ) : null}
+              </div>
+            ) : null}
           </div>
-          <div className="form-field">
-            <label className="form-label" htmlFor="calStart">
-              Bắt đầu
-            </label>
+
+          {!entry && editable ? (
+            <div className="cal-repeat">
+              <span className="cal-repeat__label">Lặp lại</span>
+              <div className="cal-repeat__freqs" role="group" aria-label="Kiểu lặp lại">
+                <button
+                  type="button"
+                  className={`cal-repeat__chip ${repeatFreq === "none" ? "is-active" : ""}`.trim()}
+                  onClick={() => setRepeatFreq("none")}
+                >
+                  Không
+                </button>
+                <button
+                  type="button"
+                  className={`cal-repeat__chip ${repeatFreq === "day" ? "is-active" : ""}`.trim()}
+                  onClick={() => setRepeatFreq("day")}
+                >
+                  Mỗi ngày
+                </button>
+                <button
+                  type="button"
+                  className={`cal-repeat__chip ${repeatFreq === "week" ? "is-active" : ""}`.trim()}
+                  onClick={() => setRepeatFreq("week")}
+                >
+                  Mỗi tuần
+                </button>
+              </div>
+              {repeatFreq !== "none" ? (
+                <label className="cal-repeat__count">
+                  <span>Số lần, kể cả lần này</span>
+                  <input
+                    type="number"
+                    className="form-input"
+                    min={1}
+                    max={REPEAT_MAX}
+                    value={repeatCount}
+                    onChange={(event) => setRepeatCount(clampRepeatCount(event.target.value))}
+                  />
+                </label>
+              ) : null}
+              {repeatPreview ? <p className="cal-repeat__preview">{repeatPreview}</p> : null}
+            </div>
+          ) : null}
+
+          <label className="cal-form__extra">
+            <span>Địa điểm</span>
             <input
-              id="calStart"
-              type="datetime-local"
               className="form-input"
-              step={60}
-              value={startLocal}
-              disabled={!editable}
-              onChange={(event) => setStartLocal(event.target.value)}
-            />
-          </div>
-          <div className="form-field">
-            <label className="form-label" htmlFor="calEnd">
-              Kết thúc
-            </label>
-            <input
-              id="calEnd"
-              type="datetime-local"
-              className="form-input"
-              step={60}
-              value={endLocal}
-              disabled={!editable}
-              onChange={(event) => setEndLocal(event.target.value)}
-            />
-          </div>
-          <div className="form-field">
-            <label className="form-label" htmlFor="calLocation">
-              Địa điểm (không bắt buộc)
-            </label>
-            <input
-              id="calLocation"
-              className="form-input"
+              placeholder="Không bắt buộc"
               value={location}
               maxLength={LOCATION_MAX}
               disabled={!editable}
               onChange={(event) => setLocation(event.target.value)}
             />
-          </div>
-          <div className="form-field">
-            <label className="form-label" htmlFor="calDesc">
-              Mô tả
-            </label>
+          </label>
+          <label className="cal-form__extra">
+            <span>Mô tả</span>
             <textarea
-              id="calDesc"
               className="form-input cal-textarea"
-              rows={4}
+              rows={3}
+              placeholder="Ghi chú thêm"
               value={description}
               maxLength={DESCRIPTION_MAX}
               disabled={!editable}
               onChange={(event) => setDescription(event.target.value)}
             />
-          </div>
+          </label>
+
           {overlap ? (
             <div className="cal-warn">
-              Lịch này trùng giờ với lịch bận khác của bạn. Vẫn có thể lưu.
+              {occurrences.length > 1
+                ? "Một số lần lặp trùng giờ với lịch bận khác — vẫn có thể lưu."
+                : "Trùng giờ với lịch bận khác của bạn — vẫn có thể lưu."}
             </div>
           ) : null}
           <div className="form-error">{error}</div>

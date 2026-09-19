@@ -17,7 +17,7 @@ import {
 } from "firebase/firestore";
 import { db } from "../config/firebase";
 import { wrapFirestoreError } from "../core/errors";
-import { addDaysYmd } from "../domain/calendar/tz";
+import { addDaysYmd, DAY_MS } from "../domain/calendar/tz";
 import { weekBounds } from "../domain/calendar/week";
 import { buildCopiedEntries } from "../domain/calendar/copyWeek";
 import {
@@ -66,13 +66,18 @@ function mapEntry(id: string, data: Record<string, unknown>): CalendarEntryDoc {
 }
 
 function weekQuery(groupId: string, weekStartMs: number, weekEndMs: number) {
+  // Một khoảng trên `startAt` — không cần composite index (endAt + startAt).
+  // Lịch qua đêm từ tuần trước vẫn nằm trong lookback 7 ngày.
   return query(
     entriesCol(groupId),
-    where("endAt", ">", Timestamp.fromMillis(weekStartMs)),
+    where("startAt", ">=", Timestamp.fromMillis(weekStartMs - 7 * DAY_MS)),
     where("startAt", "<", Timestamp.fromMillis(weekEndMs)),
-    orderBy("endAt", "asc"),
     orderBy("startAt", "asc"),
   );
+}
+
+function inWeek(entry: CalendarEntryDoc, weekStartMs: number, weekEndMs: number): boolean {
+  return entry.endAt > weekStartMs && entry.startAt < weekEndMs;
 }
 
 export function watchCalendarWeek(
@@ -85,7 +90,11 @@ export function watchCalendarWeek(
   return onSnapshot(
     weekQuery(groupId, weekStartMs, weekEndMs),
     (snap) => {
-      onChange(snap.docs.map((item) => mapEntry(item.id, item.data())));
+      onChange(
+        snap.docs
+          .map((item) => mapEntry(item.id, item.data()))
+          .filter((entry) => inWeek(entry, weekStartMs, weekEndMs)),
+      );
     },
     (error) => {
       onError(wrapFirestoreError(error, "Không tải được lịch nhóm tuần này."));
@@ -100,7 +109,9 @@ export async function listCalendarWeek(
 ): Promise<CalendarEntryDoc[]> {
   try {
     const snap = await getDocs(weekQuery(groupId, weekStartMs, weekEndMs));
-    return snap.docs.map((item) => mapEntry(item.id, item.data()));
+    return snap.docs
+      .map((item) => mapEntry(item.id, item.data()))
+      .filter((entry) => inWeek(entry, weekStartMs, weekEndMs));
   } catch (error) {
     throw wrapFirestoreError(error, "Không tải được lịch nhóm tuần này.");
   }
@@ -130,6 +141,27 @@ export async function createCalendarEntry(
   } catch (error) {
     throw wrapFirestoreError(error, "Không lưu được lịch bận.");
   }
+}
+
+export async function createCalendarEntries(
+  groupId: string,
+  uid: string,
+  inputs: CalendarEntryInput[],
+): Promise<{ added: number; failed: number }> {
+  let added = 0;
+  let failed = 0;
+  for (const input of inputs) {
+    try {
+      await createCalendarEntry(groupId, uid, input);
+      added += 1;
+    } catch {
+      failed += 1;
+    }
+  }
+  if (!added && failed) {
+    throw new Error("Không lưu được lịch bận.");
+  }
+  return { added, failed };
 }
 
 export async function updateCalendarEntry(

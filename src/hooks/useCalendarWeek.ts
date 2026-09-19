@@ -27,7 +27,11 @@ export function useCalendarWeek(
       return;
     }
 
-    setState(EMPTY);
+    setState((current) => ({
+      entries: current.ready ? [] : current.entries,
+      ready: current.ready,
+      error: "",
+    }));
 
     return watchCalendarWeek(
       groupId,
