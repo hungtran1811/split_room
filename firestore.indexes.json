@@ -41,6 +41,20 @@
           "order": "DESCENDING"
         }
       ]
+    },
+    {
+      "collectionGroup": "calendarEntries",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "endAt",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "startAt",
+          "order": "ASCENDING"
+        }
+      ]
     }
   ],
   "fieldOverrides": []

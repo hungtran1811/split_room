@@ -70,3 +70,15 @@ export type NotificationDoc = {
   createdAt?: { toMillis?: () => number };
   [key: string]: unknown;
 };
+
+export type CalendarEntryDoc = {
+  id: string;
+  uid: string;
+  title: string;
+  description: string;
+  location: string;
+  startAt: number;
+  endAt: number;
+  createdAt?: unknown;
+  updatedAt?: unknown;
+};
