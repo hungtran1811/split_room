@@ -17,3 +17,14 @@ export function memberMatchesUid(member: MemberProfile, uid: string): boolean {
 export function findMemberByUid(members: MemberProfile[], uid: string): MemberProfile | undefined {
   return members.find((member) => memberMatchesUid(member, uid));
 }
+
+export function resolveCalendarMemberLabel(
+  members: MemberProfile[],
+  key: string,
+  labelOf: (key: string) => string,
+): string {
+  const knownLabel = labelOf(key);
+  if (knownLabel && knownLabel !== key) return knownLabel;
+  const member = members.find((item) => memberKey(item) === key || memberMatchesUid(item, key));
+  return String(member?.displayName || "Thành viên");
+}

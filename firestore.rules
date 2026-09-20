@@ -252,6 +252,41 @@ service cloud.firestore {
         && request.resource.data.updatedAt is timestamp;
     }
 
+    function calendarDocPath(groupId, calendarId) {
+      return /databases/$(database)/documents/groups/$(groupId)/calendars/$(calendarId);
+    }
+
+    function canUseCalendar(groupId, calendarId) {
+      return isGroupMember(groupId)
+        && exists(calendarDocPath(groupId, calendarId))
+        && request.auth.uid in get(calendarDocPath(groupId, calendarId)).data.memberUids;
+    }
+
+    function validCalendarShape(calendarId) {
+      let data = request.resource.data;
+      return data.keys().hasOnly([
+          "name", "kind", "ownerUid", "memberUids", "createdAt", "updatedAt"
+        ])
+        && data.name is string
+        && data.name.size() > 0
+        && data.name.size() <= 80
+        && data.kind in ["private", "shared"]
+        && data.ownerUid is string
+        && data.ownerUid.size() > 0
+        && data.memberUids is list
+        && data.memberUids.size() > 0
+        && data.memberUids.toSet().size() == data.memberUids.size()
+        && data.ownerUid in data.memberUids
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp
+        && (
+          (data.kind == "private"
+            && calendarId == "private_" + data.ownerUid
+            && data.memberUids == [data.ownerUid])
+          || (data.kind == "shared" && !calendarId.matches('^private_.*$'))
+        );
+    }
+
     match /groups/{groupId} {
       allow read: if isGroupMember(groupId);
       allow create: if validBootstrapGroupCreate(groupId);
@@ -304,6 +339,60 @@ service cloud.firestore {
 
         allow delete: if isGroupMember(groupId)
           && resource.data.uid == request.auth.uid;
+      }
+
+      match /calendars/{calendarId} {
+        // Only the owner's deterministic missing document may be read for
+        // create-if-absent transactions. Other guessed IDs remain inaccessible.
+        allow get: if isGroupMember(groupId)
+          && (
+            (calendarId == "private_" + request.auth.uid
+              && !exists(calendarDocPath(groupId, calendarId)))
+            || request.auth.uid in resource.data.memberUids
+          );
+        allow list: if isGroupMember(groupId)
+          && request.auth.uid in resource.data.memberUids;
+
+        allow create: if isGroupMember(groupId)
+          && request.resource.data.ownerUid == request.auth.uid
+          && validCalendarShape(calendarId)
+          && (request.resource.data.kind == "private"
+            || request.resource.data.memberUids.size() >= 2)
+          && request.resource.data.createdAt == request.time
+          && request.resource.data.updatedAt == request.time;
+
+        allow update: if isGroupMember(groupId)
+          && resource.data.ownerUid == request.auth.uid
+          && resource.data.kind == "shared"
+          && request.resource.data.ownerUid == resource.data.ownerUid
+          && request.resource.data.kind == resource.data.kind
+          && request.resource.data.createdAt == resource.data.createdAt
+          && validCalendarShape(calendarId)
+          && request.resource.data.updatedAt == request.time;
+
+        allow delete: if false;
+
+        match /entries/{entryId} {
+          // Entry permissions depend on the current parent audience, including
+          // when the requested entry does not yet exist (copy transactions).
+          allow read: if canUseCalendar(groupId, calendarId);
+
+          allow create: if canUseCalendar(groupId, calendarId)
+            && request.resource.data.uid == request.auth.uid
+            && validCalendarEntryShape()
+            && request.resource.data.createdAt == request.time
+            && request.resource.data.updatedAt == request.time;
+
+          allow update: if canUseCalendar(groupId, calendarId)
+            && resource.data.uid == request.auth.uid
+            && request.resource.data.uid == resource.data.uid
+            && request.resource.data.createdAt == resource.data.createdAt
+            && validCalendarEntryShape()
+            && request.resource.data.updatedAt == request.time;
+
+          allow delete: if canUseCalendar(groupId, calendarId)
+            && resource.data.uid == request.auth.uid;
+        }
       }
 
       match /expenses/{expenseId} {

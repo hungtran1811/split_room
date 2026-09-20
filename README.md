@@ -17,6 +17,7 @@ Kiến trúc ngắn: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - Tiền nhà: nhập khoản, chia phần, theo dõi đã thu
 - Chốt tháng + chuông thông báo in-app (email qua Functions khi đã deploy)
 - Quản trị (owner): thành viên, promote/demote admin phụ
+- Lịch tuần: lịch Cả nhóm, Cá nhân và chia sẻ riêng; xem [quyền truy cập và hướng dẫn triển khai](docs/calendar-privacy.md)
 
 **Không còn:** màn Báo cáo, xuất CSV, sparkline/biểu đồ.
 

@@ -10,7 +10,9 @@ import {
   isCoreHour,
 } from "../../domain/calendar/visibleHours";
 import type { WeekBounds } from "../../domain/calendar/week";
-import type { CalendarEntry } from "../../domain/calendar/types";
+import type { CalendarEntry, CalendarInfo } from "../../domain/calendar/types";
+import { calendarEntryKey } from "../../domain/calendar/access";
+import { calendarName } from "./CalendarAudience";
 import type { MemberProfile } from "../../core/roles";
 import { findMemberByUid, memberKey } from "./members";
 import { HoursToggle } from "./HoursToggle";
@@ -22,6 +24,7 @@ const DRAG_CANCEL_PX = 12;
 type WeekGridProps = {
   week: WeekBounds;
   entries: CalendarEntry[];
+  calendars: CalendarInfo[];
   members: MemberProfile[];
   labelOf: (memberId: string) => string;
   selectedYmd: string;
@@ -83,6 +86,7 @@ function rangeLabel(startHour: number, endHour: number): string {
 export function WeekGrid({
   week,
   entries,
+  calendars,
   members,
   labelOf,
   selectedYmd,
@@ -351,12 +355,15 @@ export function WeekGrid({
                     const top = topPx(segment.startAt, day.startMs, startHour);
                     const height = Math.max(22, topPx(segment.endAt, day.startMs, startHour) - top - 1);
                     const width = 100 / segment.colCount;
-                    const entry = entries.find((item) => item.id === segment.entryId);
+                    const entry = entries.find((item) => calendarEntryKey(item) === segment.entryKey);
+                    const name = calendarName(segment.calendar, calendars);
                     const compact = height < 36;
                     return (
                       <button
-                        key={`${segment.entryId}-${segment.startAt}`}
+                        key={`${segment.entryKey}-${segment.startAt}`}
                         type="button"
+                        title={`${segment.title} · ${labelOf(key)} · ${name}`}
+                        aria-label={`${formatTimeRange(segment.startAt, segment.endAt, day.endMs)} · ${segment.title} · ${labelOf(key)} · ${name}`}
                         className={`cal-block ${compact ? "is-compact" : ""} ${segment.continuesFromPrev ? "is-cont-prev" : ""} ${segment.continuesToNext ? "is-cont-next" : ""}`.trim()}
                         style={{
                           top,
@@ -374,14 +381,14 @@ export function WeekGrid({
                         onClick={(event) => {
                           event.stopPropagation();
                           onSelectDay(day.ymd);
-                          onOpenEntry(segment.entryId);
+                          onOpenEntry(segment.entryKey);
                         }}
                       >
                         <span className="cal-time-chip">
                           {formatTimeRange(segment.startAt, segment.endAt, day.endMs)}
                         </span>
                         <span className="cal-block__title">{entry?.title || segment.title}</span>
-                        {compact ? null : <span className="cal-block__meta">{labelOf(key)}</span>}
+                        {compact ? null : <span className="cal-block__meta">{labelOf(key)} · {name}</span>}
                       </button>
                     );
                   })}

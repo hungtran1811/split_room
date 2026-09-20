@@ -1,5 +1,6 @@
 import { vnDateTimeLocalToMs } from "./tz";
 import type { CalendarEntry, CalendarInterval } from "./types";
+import { calendarEntryKey } from "./access";
 
 export const TITLE_MAX = 120;
 export const DESCRIPTION_MAX = 2000;
@@ -96,7 +97,8 @@ export function hasSelfOverlap(
   return entries.some(
     (entry) =>
       entry.uid === uid &&
-      entry.id !== excludeId &&
+      calendarEntryKey(entry) !== excludeId &&
+      (entry.calendar || entry.id !== excludeId) &&
       intervalsOverlap(entry, draft),
   );
 }

@@ -1,7 +1,9 @@
 import { colorForMember } from "../../domain/calendar/colors";
 import { formatTimeRange, todayYmdVn } from "../../domain/calendar/tz";
 import type { WeekBounds, WeekDay } from "../../domain/calendar/week";
-import type { CalendarEntry } from "../../domain/calendar/types";
+import type { CalendarEntry, CalendarInfo } from "../../domain/calendar/types";
+import { calendarEntryKey } from "../../domain/calendar/access";
+import { calendarName } from "./CalendarAudience";
 import type { MemberProfile } from "../../core/roles";
 import { MemberAvatar } from "../../shared/ui/MemberAvatar";
 import { memberKey, memberMatchesUid, memberUid } from "./members";
@@ -10,6 +12,7 @@ type WeekDetailsProps = {
   week: WeekBounds;
   selectedYmd: string;
   entries: CalendarEntry[];
+  calendars: CalendarInfo[];
   members: MemberProfile[];
   visibleUids: string[];
   labelOf: (memberId: string) => string;
@@ -62,6 +65,7 @@ export function WeekDetails({
   week,
   selectedYmd,
   entries,
+  calendars,
   members,
   visibleUids,
   labelOf,
@@ -85,7 +89,7 @@ export function WeekDetails({
 
   return (
     <div className="cal-week-details">
-      <p className="cal-week-details__hint">Vuốt ngang để xem đủ T2–CN của cả nhóm · ô trống là rảnh</p>
+      <p className="cal-week-details__hint">Vuốt ngang để xem đủ T2–CN. Ô trống chỉ có nghĩa là không có lịch hiển thị; thành viên có thể có lịch riêng.</p>
       <table className="cal-week-board">
         <colgroup>
           <col className="cal-week-board__col-person" />
@@ -117,7 +121,7 @@ export function WeekDetails({
             const busyDays = week.days.filter((day) =>
               memberEntries.some((entry) => overlapsDay(entry, day)),
             ).length;
-            const allFree = memberEntries.length === 0;
+            const noEntries = memberEntries.length === 0;
 
             return (
               <tr key={uid || key}>
@@ -126,8 +130,8 @@ export function WeekDetails({
                     <MemberAvatar memberId={key} label={labelOf(key)} size={40} />
                     <div className="cal-week-board__copy">
                       <strong>{labelOf(key)}</strong>
-                      <span className={allFree ? "cal-person__status is-free" : "cal-person__status is-busy"}>
-                        {allFree ? "Rảnh cả tuần" : `${memberEntries.length} lịch · ${busyDays} ngày`}
+                      <span className={noEntries ? "cal-person__status" : "cal-person__status is-busy"}>
+                        {noEntries ? "Không có lịch hiển thị" : `${memberEntries.length} lịch · ${busyDays} ngày`}
                       </span>
                     </div>
                   </div>
@@ -140,7 +144,7 @@ export function WeekDetails({
                         {dayEntries.length ? (
                           dayEntries.map((entry) => (
                             <button
-                              key={entry.id}
+                              key={calendarEntryKey(entry)}
                               type="button"
                               className="cal-week-event"
                               style={{
@@ -148,15 +152,16 @@ export function WeekDetails({
                                 background: color.bg,
                                 color: color.text,
                               }}
-                              onClick={() => onOpenEntry(entry.id)}
+                              onClick={() => onOpenEntry(calendarEntryKey(entry))}
                             >
                               <span className="cal-week-event__time">{formatDayRange(entry, day)}</span>
                               <span className="cal-week-event__title">{entry.title}</span>
+                              <span className="cal-week-event__calendar">{calendarName(entry.calendar, calendars)}</span>
                             </button>
                           ))
                         ) : (
                           <span className="cal-week-board__free">
-                            <span className="visually-hidden">Rảnh</span>
+                            <span className="visually-hidden">Không có lịch hiển thị</span>
                           </span>
                         )}
                       </div>
@@ -185,18 +190,19 @@ export function WeekDetails({
                       {dayEntries.length ? (
                         dayEntries.map((entry) => (
                           <button
-                            key={entry.id}
+                            key={calendarEntryKey(entry)}
                             type="button"
                             className="cal-week-event"
-                            onClick={() => onOpenEntry(entry.id)}
+                            onClick={() => onOpenEntry(calendarEntryKey(entry))}
                           >
                             <span className="cal-week-event__time">{formatDayRange(entry, day)}</span>
                             <span className="cal-week-event__title">{entry.title}</span>
+                            <span className="cal-week-event__calendar">{calendarName(entry.calendar, calendars)}</span>
                           </button>
                         ))
                       ) : (
                         <span className="cal-week-board__free">
-                          <span className="visually-hidden">Không có lịch</span>
+                          <span className="visually-hidden">Không có lịch hiển thị</span>
                         </span>
                       )}
                     </div>

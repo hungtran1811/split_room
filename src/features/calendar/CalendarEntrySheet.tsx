@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { BottomSheet } from "../../shared/ui/BottomSheet";
 import { Button } from "../../shared/ui/Button";
 import { ConfirmDialog } from "../../shared/ui/ConfirmDialog";
@@ -27,11 +27,15 @@ import {
   REPEAT_MAX,
   type RepeatFreq,
 } from "../../domain/calendar/repeat";
-import type { CalendarEntry } from "../../domain/calendar/types";
+import type { CalendarEntry, CalendarInfo, CalendarRef } from "../../domain/calendar/types";
+import { calendarEntryKey, calendarKey, canEditCalendarEntry } from "../../domain/calendar/access";
+import type { MemberProfile } from "../../core/roles";
+import { CalendarAudience } from "./CalendarAudience";
 import {
   createCalendarEntries,
   deleteCalendarEntry,
   updateCalendarEntry,
+  moveCalendarEntry,
 } from "../../services/calendar.service";
 import { formatViDateShort } from "../../shared/lib/date";
 import { useToast } from "../../shared/ui/Toast";
@@ -42,6 +46,10 @@ type CalendarEntrySheetProps = {
   groupId: string;
   uid: string;
   weekEntries: CalendarEntry[];
+  calendars: CalendarInfo[];
+  defaultCalendar: CalendarRef;
+  members: MemberProfile[];
+  labelOf: (memberId: string) => string;
   selectedYmd: string;
   draftStartLocal?: string | null;
   draftEndLocal?: string | null;
@@ -131,6 +139,10 @@ export function CalendarEntrySheet({
   groupId,
   uid,
   weekEntries,
+  calendars,
+  defaultCalendar,
+  members,
+  labelOf,
   selectedYmd,
   draftStartLocal,
   draftEndLocal,
@@ -139,7 +151,7 @@ export function CalendarEntrySheet({
   onSaved,
 }: CalendarEntrySheetProps) {
   const { showToast } = useToast();
-  const isOwner = Boolean(entry && entry.uid === uid);
+  const isOwner = Boolean(entry && canEditCalendarEntry(entry, uid));
   const editable = canEdit && (!entry || isOwner);
   const [title, setTitle] = useState("");
   const [dateYmd, setDateYmd] = useState(selectedYmd);
@@ -152,9 +164,28 @@ export function CalendarEntrySheet({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [repeatFreq, setRepeatFreq] = useState<RepeatFreq>("none");
   const [repeatCount, setRepeatCount] = useState(4);
+  const [targetKey, setTargetKey] = useState(() => calendarKey(entry?.calendar || defaultCalendar));
+  const targetCalendar = calendars.find((calendar) => calendarKey(calendar) === targetKey);
+  const moving = Boolean(entry && targetCalendar && calendarKey(entry.calendar) !== targetKey);
+  const defaultCalendarKey = calendarKey(defaultCalendar);
+  const initializedDraftKey = useRef<string | null>(null);
+  const draftKey = JSON.stringify([
+    groupId,
+    uid,
+    entry ? calendarEntryKey(entry) : ["new", defaultCalendarKey, selectedYmd, draftStartLocal, draftEndLocal],
+  ]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      initializedDraftKey.current = null;
+      return;
+    }
+    // A fresh snapshot can contain a new object for the same event. Preserve edits until
+    // this sheet is reopened or switches identity; permission changes remount it upstream.
+    if (editable && initializedDraftKey.current === draftKey) return;
+    initializedDraftKey.current = draftKey;
+    setTargetKey(entry ? calendarKey(entry.calendar) : defaultCalendarKey);
+    setConfirmDelete(false);
     if (entry) {
       const start = splitLocal(msToVnDateTimeLocal(entry.startAt));
       const end = splitLocal(msToVnDateTimeLocal(entry.endAt));
@@ -176,7 +207,7 @@ export function CalendarEntrySheet({
       setRepeatCount(4);
     }
     setError("");
-  }, [open, entry, selectedYmd, draftStartLocal, draftEndLocal]);
+  }, [open, entry, selectedYmd, draftStartLocal, draftEndLocal, defaultCalendarKey, draftKey, editable]);
 
   const endYmd = endDateFor(dateYmd, startHm, endHm);
   const startLocal = combineLocal(dateYmd, startHm);
@@ -195,7 +226,11 @@ export function CalendarEntrySheet({
 
   const overlap =
     occurrences.length > 0 &&
-    occurrences.some((item) => hasSelfOverlap(weekEntries, uid, item, entry?.id));
+    occurrences.some((item) => hasSelfOverlap(
+      weekEntries.filter((candidate) => !entry || calendarEntryKey(candidate) !== calendarEntryKey(entry)),
+      uid,
+      item,
+    ));
 
   const repeatPreview = useMemo(() => {
     if (entry || repeatFreq === "none" || occurrences.length < 2) return "";
@@ -223,7 +258,7 @@ export function CalendarEntrySheet({
   }
 
   async function handleSave() {
-    if (!editable) return;
+    if (!editable || !targetCalendar || saving) return;
     setError("");
     const checked = validateCalendarEntryInput({
       title,
@@ -240,7 +275,8 @@ export function CalendarEntrySheet({
     setSaving(true);
     try {
       if (entry) {
-        await updateCalendarEntry(groupId, entry.id, checked);
+        if (moving) await moveCalendarEntry(groupId, entry.calendar, targetCalendar, entry.id, checked);
+        else await updateCalendarEntry(groupId, entry.calendar, entry.id, checked);
         showToast({ title: "Đã lưu", message: "Đã cập nhật lịch bận.", variant: "success" });
       } else {
         const inputs = occurrences.map((item) => ({
@@ -248,7 +284,7 @@ export function CalendarEntrySheet({
           startAt: item.startAt,
           endAt: item.endAt,
         }));
-        const result = await createCalendarEntries(groupId, uid, inputs);
+        const result = await createCalendarEntries(groupId, targetCalendar, uid, inputs);
         const extra = result.failed ? `, lỗi ${result.failed}` : "";
         showToast({
           title: "Đã lưu",
@@ -276,7 +312,7 @@ export function CalendarEntrySheet({
     if (!entry || !isOwner) return;
     setSaving(true);
     try {
-      await deleteCalendarEntry(groupId, entry.id);
+      await deleteCalendarEntry(groupId, entry.calendar, entry.id);
       showToast({ title: "Đã xóa", message: "Đã xóa lịch bận.", variant: "success" });
       setConfirmDelete(false);
       onClose();
@@ -292,7 +328,7 @@ export function CalendarEntrySheet({
     <>
       <BottomSheet
         open={open}
-        onClose={onClose}
+        onClose={() => { if (!confirmDelete && !saving) onClose(); }}
         title={entry ? (editable ? "Sửa lịch bận" : "Chi tiết lịch bận") : "Thêm lịch bận"}
         footer={
           editable ? (
@@ -304,7 +340,7 @@ export function CalendarEntrySheet({
               ) : (
                 <span />
               )}
-              <Button variant="primary" onClick={() => void handleSave()} disabled={saving}>
+              <Button variant="primary" onClick={() => void handleSave()} disabled={saving || !targetCalendar}>
                 {saving
                   ? "Đang lưu..."
                   : !entry && occurrences.length > 1
@@ -316,8 +352,17 @@ export function CalendarEntrySheet({
         }
       >
         <div className="cal-form">
+          <label className="cal-form__extra">
+            <span>Thuộc lịch</span>
+            <select className="form-input" value={targetKey} disabled={!editable || saving} onChange={(event) => setTargetKey(event.target.value)}>
+              {calendars.map((calendar) => <option key={calendarKey(calendar)} value={calendarKey(calendar)}>{calendar.name}</option>)}
+            </select>
+          </label>
+          {targetCalendar ? <CalendarAudience calendar={targetCalendar} members={members} labelOf={labelOf} /> : <p className="form-error">Bạn không còn quyền truy cập lịch này.</p>}
+          {moving ? <p className="cal-warn">Khi lưu, sự kiện sẽ chuyển sang “{targetCalendar?.name}”. Chỉ những người được xem lịch mới ở trên sẽ thấy sự kiện này.</p> : null}
           <input
             id="calTitle"
+            aria-label="Tiêu đề"
             className="cal-form__title"
             placeholder="Thêm tiêu đề"
             value={title}
@@ -422,7 +467,7 @@ export function CalendarEntrySheet({
                   />
                 </label>
               ) : null}
-              {repeatPreview ? <p className="cal-repeat__preview">{repeatPreview}</p> : null}
+              {repeatPreview ? <p className="cal-repeat__preview">{repeatPreview} · Thuộc lịch: {targetCalendar?.name}</p> : null}
             </div>
           ) : null}
 
@@ -461,8 +506,8 @@ export function CalendarEntrySheet({
         </div>
       </BottomSheet>
 
-      <ConfirmDialog
-        open={confirmDelete}
+      <div className="cal-confirm"><ConfirmDialog
+        open={confirmDelete && open}
         title="Xóa lịch bận?"
         description="Thao tác này xóa toàn bộ lịch, kể cả phần qua đêm."
         confirmLabel="Xóa"
@@ -470,7 +515,7 @@ export function CalendarEntrySheet({
         pending={saving}
         onCancel={() => setConfirmDelete(false)}
         onConfirm={() => void handleDelete()}
-      />
+      /></div>
     </>
   );
 }

@@ -1,45 +1,34 @@
 import {
-  collection,
-  deleteDoc,
-  doc,
-  getDocs,
-  onSnapshot,
-  orderBy,
-  query,
-  runTransaction,
-  serverTimestamp,
-  setDoc,
-  Timestamp,
-  updateDoc,
-  where,
-  type Firestore,
-  type Unsubscribe,
+  collection, deleteDoc, doc, getDocsFromServer, onSnapshot, orderBy, query,
+  runTransaction, serverTimestamp, setDoc, Timestamp, updateDoc, where,
+  type Firestore, type Unsubscribe,
 } from "firebase/firestore";
 import { db } from "../config/firebase";
 import { wrapFirestoreError } from "../core/errors";
-import { addDaysYmd, DAY_MS } from "../domain/calendar/tz";
+import { addDaysYmd } from "../domain/calendar/tz";
 import { weekBounds } from "../domain/calendar/week";
 import { buildCopiedEntries } from "../domain/calendar/copyWeek";
-import {
-  validateCalendarEntryInput,
-  type CalendarEntryInput,
-} from "../domain/calendar/validate";
-import type { CalendarEntry, CopyWeekResult } from "../domain/calendar/types";
+import { calendarEntryKey, calendarKey } from "../domain/calendar/access";
+import { validateCalendarEntryInput, type CalendarEntryInput } from "../domain/calendar/validate";
+import type { CalendarEntry, CalendarInfo, CalendarRef, CopyWeekResult } from "../domain/calendar/types";
 import type { CalendarEntryDoc } from "../types/models";
 
 function requireDb(): Firestore {
-  if (!db) {
-    throw new Error("Firestore chưa được cấu hình.");
-  }
+  if (!db) throw new Error("Firestore chưa được cấu hình.");
   return db;
 }
 
-function entriesCol(groupId: string) {
-  return collection(requireDb(), "groups", groupId, "calendarEntries");
+function entriesCol(groupId: string, calendar: CalendarRef) {
+  if (!calendar.id || calendar.id.includes("/")) throw new Error("Lịch không hợp lệ.");
+  if (calendar.kind === "group") {
+    if (calendar.id !== "group") throw new Error("Lịch nhóm không hợp lệ.");
+    return collection(requireDb(), "groups", groupId, "calendarEntries");
+  }
+  return collection(requireDb(), "groups", groupId, "calendars", calendar.id, "entries");
 }
 
-function entryRef(groupId: string, entryId: string) {
-  return doc(requireDb(), "groups", groupId, "calendarEntries", entryId);
+function entryRef(groupId: string, calendar: CalendarRef, entryId: string) {
+  return doc(entriesCol(groupId, calendar), entryId);
 }
 
 function toMillis(value: unknown): number {
@@ -51,9 +40,10 @@ function toMillis(value: unknown): number {
   return 0;
 }
 
-function mapEntry(id: string, data: Record<string, unknown>): CalendarEntryDoc {
+function mapEntry(id: string, calendar: CalendarRef, data: Record<string, unknown>): CalendarEntryDoc {
   return {
     id,
+    calendar: { kind: calendar.kind, id: calendar.id },
     uid: String(data.uid || ""),
     title: String(data.title || ""),
     description: String(data.description || ""),
@@ -65,13 +55,13 @@ function mapEntry(id: string, data: Record<string, unknown>): CalendarEntryDoc {
   };
 }
 
-function weekQuery(groupId: string, weekStartMs: number, weekEndMs: number) {
-  // Một khoảng trên `startAt` — không cần composite index (endAt + startAt).
-  // Lịch qua đêm từ tuần trước vẫn nằm trong lookback 7 ngày.
+function weekQuery(groupId: string, calendar: CalendarRef, weekStartMs: number, weekEndMs: number) {
+  // Include every interval intersecting the week, including long/overnight entries.
   return query(
-    entriesCol(groupId),
-    where("startAt", ">=", Timestamp.fromMillis(weekStartMs - 7 * DAY_MS)),
+    entriesCol(groupId, calendar),
+    where("endAt", ">", Timestamp.fromMillis(weekStartMs)),
     where("startAt", "<", Timestamp.fromMillis(weekEndMs)),
+    orderBy("endAt", "asc"),
     orderBy("startAt", "asc"),
   );
 }
@@ -82,58 +72,67 @@ function inWeek(entry: CalendarEntryDoc, weekStartMs: number, weekEndMs: number)
 
 export function watchCalendarWeek(
   groupId: string,
+  calendar: CalendarRef,
   weekStartMs: number,
   weekEndMs: number,
   onChange: (entries: CalendarEntryDoc[]) => void,
   onError: (error: Error) => void,
+  onPending?: () => void,
 ): Unsubscribe {
   return onSnapshot(
-    weekQuery(groupId, weekStartMs, weekEndMs),
-    (snap) => {
-      onChange(
-        snap.docs
-          .map((item) => mapEntry(item.id, item.data()))
-          .filter((entry) => inWeek(entry, weekStartMs, weekEndMs)),
-      );
+    weekQuery(groupId, calendar, weekStartMs, weekEndMs),
+    { includeMetadataChanges: true },
+    (snapshot) => {
+      if (snapshot.metadata.fromCache) {
+        onPending?.();
+        return;
+      }
+      // Keep the last confirmed view during writes, without publishing uncommitted data.
+      if (snapshot.metadata.hasPendingWrites) return;
+      onChange(snapshot.docs
+        .map((item) => mapEntry(item.id, calendar, item.data()))
+        .filter((entry) => inWeek(entry, weekStartMs, weekEndMs)));
     },
-    (error) => {
-      onError(wrapFirestoreError(error, "Không tải được lịch nhóm tuần này."));
-    },
+    (error) => onError(wrapFirestoreError(error, "Không tải được lịch tuần này.")),
   );
 }
 
 export async function listCalendarWeek(
   groupId: string,
+  calendar: CalendarRef,
   weekStartMs: number,
   weekEndMs: number,
 ): Promise<CalendarEntryDoc[]> {
   try {
-    const snap = await getDocs(weekQuery(groupId, weekStartMs, weekEndMs));
-    return snap.docs
-      .map((item) => mapEntry(item.id, item.data()))
+    const snapshot = await getDocsFromServer(weekQuery(groupId, calendar, weekStartMs, weekEndMs));
+    return snapshot.docs
+      .map((item) => mapEntry(item.id, calendar, item.data()))
       .filter((entry) => inWeek(entry, weekStartMs, weekEndMs));
   } catch (error) {
-    throw wrapFirestoreError(error, "Không tải được lịch nhóm tuần này.");
+    throw wrapFirestoreError(error, "Không tải được lịch tuần này.");
   }
 }
 
-export async function createCalendarEntry(
-  groupId: string,
-  uid: string,
-  input: CalendarEntryInput,
-): Promise<string> {
+function checkedFields(input: CalendarEntryInput) {
   const checked = validateCalendarEntryInput(input);
   if (!checked.ok) throw new Error(checked.error);
+  return {
+    title: checked.title,
+    description: checked.description,
+    location: checked.location,
+    startAt: Timestamp.fromMillis(checked.startAt),
+    endAt: Timestamp.fromMillis(checked.endAt),
+  };
+}
 
-  const ref = doc(entriesCol(groupId));
+export async function createCalendarEntry(
+  groupId: string, calendar: CalendarRef, uid: string, input: CalendarEntryInput,
+): Promise<string> {
+  const fields = checkedFields(input);
   try {
+    const ref = doc(entriesCol(groupId, calendar));
     await setDoc(ref, {
-      uid,
-      title: checked.title,
-      description: checked.description,
-      location: checked.location,
-      startAt: Timestamp.fromMillis(checked.startAt),
-      endAt: Timestamp.fromMillis(checked.endAt),
+      uid, ...fields,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
@@ -144,59 +143,80 @@ export async function createCalendarEntry(
 }
 
 export async function createCalendarEntries(
-  groupId: string,
-  uid: string,
-  inputs: CalendarEntryInput[],
+  groupId: string, calendar: CalendarRef, uid: string, inputs: CalendarEntryInput[],
 ): Promise<{ added: number; failed: number }> {
   let added = 0;
   let failed = 0;
   for (const input of inputs) {
     try {
-      await createCalendarEntry(groupId, uid, input);
+      await createCalendarEntry(groupId, calendar, uid, input);
       added += 1;
     } catch {
       failed += 1;
     }
   }
-  if (!added && failed) {
-    throw new Error("Không lưu được lịch bận.");
-  }
+  if (!added && failed) throw new Error("Không lưu được lịch bận.");
   return { added, failed };
 }
 
 export async function updateCalendarEntry(
-  groupId: string,
-  entryId: string,
-  input: CalendarEntryInput,
+  groupId: string, calendar: CalendarRef, entryId: string, input: CalendarEntryInput,
 ): Promise<void> {
-  const checked = validateCalendarEntryInput(input);
-  if (!checked.ok) throw new Error(checked.error);
-
+  const fields = checkedFields(input);
   try {
-    await updateDoc(entryRef(groupId, entryId), {
-      title: checked.title,
-      description: checked.description,
-      location: checked.location,
-      startAt: Timestamp.fromMillis(checked.startAt),
-      endAt: Timestamp.fromMillis(checked.endAt),
-      updatedAt: serverTimestamp(),
+    await updateDoc(entryRef(groupId, calendar, entryId), {
+      ...fields, updatedAt: serverTimestamp(),
     });
   } catch (error) {
     throw wrapFirestoreError(error, "Không cập nhật được lịch bận.");
   }
 }
 
-export async function deleteCalendarEntry(groupId: string, entryId: string): Promise<void> {
+export async function deleteCalendarEntry(
+  groupId: string, calendar: CalendarRef, entryId: string,
+): Promise<void> {
   try {
-    await deleteDoc(entryRef(groupId, entryId));
+    await deleteDoc(entryRef(groupId, calendar, entryId));
   } catch (error) {
     throw wrapFirestoreError(error, "Không xóa được lịch bận.");
+  }
+}
+
+export async function moveCalendarEntry(
+  groupId: string, source: CalendarRef, target: CalendarRef,
+  entryId: string, input: CalendarEntryInput,
+): Promise<string> {
+  if (calendarKey(source) === calendarKey(target)) {
+    await updateCalendarEntry(groupId, source, entryId, input);
+    return entryId;
+  }
+  const fields = checkedFields(input);
+  try {
+    const sourceRef = entryRef(groupId, source, entryId);
+    const targetRef = doc(entriesCol(groupId, target));
+    await runTransaction(requireDb(), async (transaction) => {
+      const snapshot = await transaction.get(sourceRef);
+      if (!snapshot.exists()) throw new Error("Lịch bận không còn tồn tại.");
+      transaction.set(targetRef, {
+        uid: snapshot.data().uid,
+        ...fields,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      transaction.delete(sourceRef);
+    });
+    return targetRef.id;
+  } catch (error) {
+    throw wrapFirestoreError(error, "Không chuyển được lịch bận. Lịch gốc được giữ nguyên.");
   }
 }
 
 export type CopyCandidate = {
   sourceId: string;
   destId: string;
+  sourceKey: string;
+  destKey: string;
+  calendar: CalendarRef;
   uid: string;
   title: string;
   description: string;
@@ -206,72 +226,62 @@ export type CopyCandidate = {
 };
 
 export async function previewCopyFromPreviousWeek(
-  groupId: string,
-  uid: string,
-  targetWeekStartYmd: string,
+  groupId: string, uid: string, calendars: CalendarInfo[], targetWeekStartYmd: string,
 ): Promise<CopyCandidate[]> {
   const previousStart = addDaysYmd(weekBounds(targetWeekStartYmd).startYmd, -7);
   const previous = weekBounds(previousStart);
-  const listed = await listCalendarWeek(groupId, previous.startMs, previous.endMs);
-  const asEntries: CalendarEntry[] = listed.map((item) => ({
-    id: item.id,
-    uid: item.uid,
-    title: item.title,
-    description: item.description,
-    location: item.location,
-    startAt: item.startAt,
-    endAt: item.endAt,
+  const listed = (await Promise.all(calendars.map((calendar) =>
+    listCalendarWeek(groupId, calendar, previous.startMs, previous.endMs),
+  ))).flat();
+  const entries: CalendarEntry[] = listed.filter((item) => item.uid === uid);
+  return buildCopiedEntries(entries, targetWeekStartYmd).map((item) => ({
+    sourceId: item.sourceId,
+    destId: item.destId,
+    sourceKey: calendarEntryKey({ id: item.sourceId, calendar: item.entry.calendar }),
+    destKey: calendarEntryKey({ id: item.destId, calendar: item.entry.calendar }),
+    calendar: item.entry.calendar,
+    uid: item.entry.uid,
+    title: item.entry.title,
+    description: item.entry.description,
+    location: item.entry.location,
+    startAt: item.entry.startAt,
+    endAt: item.entry.endAt,
   }));
-
-  return buildCopiedEntries(asEntries, targetWeekStartYmd)
-    .filter((item) => item.entry.uid === uid)
-    .map((item) => ({
-      sourceId: item.sourceId,
-      destId: item.destId,
-      uid: item.entry.uid,
-      title: item.entry.title,
-      description: item.entry.description,
-      location: item.entry.location,
-      startAt: item.entry.startAt,
-      endAt: item.entry.endAt,
-    }));
-}
-
-function sourceIdFromCopy(destId: string, targetWeekStartYmd: string, fallback: string): string {
-  const suffix = `__${targetWeekStartYmd}`;
-  if (destId.endsWith(suffix)) return destId.slice(0, -suffix.length);
-  return fallback;
 }
 
 export async function copyPreviousWeekEntries(
-  groupId: string,
-  uid: string,
-  targetWeekStartYmd: string,
-  candidates?: CopyCandidate[],
+  groupId: string, uid: string, calendars: CalendarInfo[],
+  targetWeekStartYmd: string, candidates?: CopyCandidate[],
 ): Promise<CopyWeekResult> {
-  const items =
-    candidates && candidates.length
-      ? candidates
-      : await previewCopyFromPreviousWeek(groupId, uid, targetWeekStartYmd);
-
+  const items = candidates ?? await previewCopyFromPreviousWeek(groupId, uid, calendars, targetWeekStartYmd);
+  const allowedKeys = new Set(calendars.map(calendarKey));
   const result: CopyWeekResult = { added: 0, skipped: 0, failed: [] };
-  const firestore = requireDb();
 
   for (const candidate of items) {
-    const destId = candidate.destId;
-    const sourceId = candidate.sourceId || sourceIdFromCopy(destId, targetWeekStartYmd, destId);
+    const { calendar, sourceId, destId } = candidate;
+    const sourceKey = calendarEntryKey({ calendar, id: sourceId });
+    const destKey = calendarEntryKey({ calendar, id: destId });
     try {
-      const status = await runTransaction(firestore, async (tx) => {
-        const ref = entryRef(groupId, destId);
-        const snap = await tx.get(ref);
-        if (snap.exists()) return "skipped" as const;
-        tx.set(ref, {
+      if (candidate.uid !== uid || !allowedKeys.has(calendarKey(calendar))) {
+        throw new Error("Bạn không còn quyền sao chép lịch này.");
+      }
+      const status = await runTransaction(requireDb(), async (transaction) => {
+        // Re-read the source: stale previews must not copy revoked, moved, or deleted data.
+        const source = await transaction.get(entryRef(groupId, calendar, sourceId));
+        if (!source.exists() || source.data().uid !== uid) {
+          throw new Error("Lịch nguồn không còn tồn tại hoặc không thuộc về bạn.");
+        }
+        const ref = entryRef(groupId, calendar, destId);
+        const destination = await transaction.get(ref);
+        if (destination.exists()) return "skipped" as const;
+        const current = mapEntry(sourceId, calendar, source.data());
+        const copied = buildCopiedEntries([current], targetWeekStartYmd)[0];
+        if (!copied || copied.destId !== destId) {
+          throw new Error("Lịch nguồn đã đổi tuần. Hãy tải lại bản xem trước.");
+        }
+        transaction.set(ref, {
           uid,
-          title: candidate.title,
-          description: candidate.description,
-          location: candidate.location,
-          startAt: Timestamp.fromMillis(candidate.startAt),
-          endAt: Timestamp.fromMillis(candidate.endAt),
+          ...checkedFields(copied.entry),
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
         });
@@ -281,12 +291,10 @@ export async function copyPreviousWeekEntries(
       else result.added += 1;
     } catch (error) {
       result.failed.push({
-        sourceId,
-        destId,
+        sourceId, destId, sourceKey, destKey, calendar,
         message: wrapFirestoreError(error, "Không sao chép được lịch này.").message,
       });
     }
   }
-
   return result;
 }
