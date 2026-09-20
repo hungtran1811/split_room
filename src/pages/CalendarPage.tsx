@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { LockBanner } from "../shared/ui/PageHeader";
 import { PageLoadingSkeleton } from "../shared/ui/Skeleton";
 import { useSession } from "../app/SessionContext";
 import { useMemberLabel } from "../hooks/useMemberLabel";
 import { useCalendarWeek } from "../hooks/useCalendarWeek";
+import { useCalendars } from "../hooks/useCalendars";
 import { useNowMs } from "../hooks/useNowMs";
 import {
   currentWeekStartYmd,
@@ -17,10 +18,13 @@ import { WeekGrid } from "../features/calendar/WeekGrid";
 import { WeekDetails } from "../features/calendar/WeekDetails";
 import { CalendarEntrySheet } from "../features/calendar/CalendarEntrySheet";
 import { CopyWeekSheet } from "../features/calendar/CopyWeekSheet";
+import { CalendarManagerSheet } from "../features/calendar/CalendarManagerSheet";
+import { CalendarAudience } from "../features/calendar/CalendarAudience";
 import { BottomSheet } from "../shared/ui/BottomSheet";
-import { memberMatchesUid, memberUid } from "../features/calendar/members";
+import { Button } from "../shared/ui/Button";
+import { memberMatchesUid, memberUid, resolveCalendarMemberLabel } from "../features/calendar/members";
 import { countEntriesOutsideCoreHours } from "../domain/calendar/visibleHours";
-import type { CalendarEntry } from "../domain/calendar/types";
+import { calendarEntryKey, calendarKey, canManageCalendar } from "../domain/calendar/access";
 
 function useDesktopCalendar() {
   const [isDesktop, setIsDesktop] = useState(() =>
@@ -40,7 +44,16 @@ function useDesktopCalendar() {
 
 export function CalendarPage() {
   const session = useSession();
-  const labelOf = useMemberLabel();
+  return <CalendarPageContent key={`${session.groupId || ""}:${session.user?.uid || ""}`} />;
+}
+
+function CalendarPageContent() {
+  const session = useSession();
+  const rosterLabelOf = useMemberLabel();
+  const labelOf = useCallback(
+    (key: string) => resolveCalendarMemberLabel(session.members, key, rosterLabelOf),
+    [session.members, rosterLabelOf],
+  );
   const isDesktop = useDesktopCalendar();
   const nowMs = useNowMs();
   const liveWeekStartYmd = currentWeekStartYmd(nowMs);
@@ -60,10 +73,25 @@ export function CalendarPage() {
   const [draftEndLocal, setDraftEndLocal] = useState<string | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [showAllHours, setShowAllHours] = useState(false);
+  const [selectedCalendarKey, setSelectedCalendarKey] = useState("all");
+  const [managerOpen, setManagerOpen] = useState(false);
+  const [managedCalendarKey, setManagedCalendarKey] = useState<string | null>(null);
 
-  const live = useCalendarWeek(session.groupId, week.startMs, week.endMs);
   const myUid = session.user?.uid || "";
-  const canEdit = Boolean(myUid && session.groupId);
+  const catalog = useCalendars(session.groupId, myUid);
+  const calendars = catalog.calendars;
+  const live = useCalendarWeek(session.groupId, myUid, calendars, week.startMs, week.endMs);
+  const ready = catalog.ready && live.ready;
+  const canEdit = Boolean(myUid && session.groupId && ready);
+  const error = catalog.error || live.error;
+  const selectedCalendar = calendars.find((calendar) => calendarKey(calendar) === selectedCalendarKey);
+  const defaultCalendar = selectedCalendar || calendars.find((calendar) => calendar.kind === "private");
+  const managedCalendar = calendars.find((calendar) => calendarKey(calendar) === managedCalendarKey);
+  const calendarPermissionsKey = calendars.map((calendar) => `${calendarKey(calendar)}:${calendar.memberUids.slice().sort().join(",")}`).sort().join("|");
+  const copyCalendars = useMemo(
+    () => selectedCalendar ? [selectedCalendar] : calendars,
+    [selectedCalendar, calendars],
+  );
 
   useEffect(() => {
     if (!followLiveWeek) return;
@@ -81,34 +109,23 @@ export function CalendarPage() {
     }
   }, [week, selectedYmd, nowMs]);
 
-  const entries = useMemo<CalendarEntry[]>(
-    () =>
-      live.entries.map((item) => ({
-        id: item.id,
-        uid: item.uid,
-        title: item.title,
-        description: item.description,
-        location: item.location,
-        startAt: item.startAt,
-        endAt: item.endAt,
-      })),
-    [live.entries],
-  );
+  const entries = ready ? live.entries : [];
 
   const members = session.members;
   const allUids = members.map(memberUid).filter(Boolean);
   const activeUids = visibleUids?.length ? visibleUids : allUids;
+  const calendarEntries = selectedCalendar ? entries.filter((entry) => calendarKey(entry.calendar) === selectedCalendarKey) : entries;
   const visibleEntries =
     visibleUids == null
-      ? entries
-      : entries.filter((entry) =>
+      ? calendarEntries
+      : calendarEntries.filter((entry) =>
           members.some(
             (member) =>
               visibleUids.some((uid) => memberMatchesUid(member, uid)) &&
               memberMatchesUid(member, entry.uid),
           ),
         );
-  const activeEntry = entries.find((item) => item.id === activeEntryId) || null;
+  const activeEntry = entries.find((item) => calendarEntryKey(item) === activeEntryId) || null;
   const outsideHourCount = useMemo(
     () =>
       countEntriesOutsideCoreHours({
@@ -118,6 +135,29 @@ export function CalendarPage() {
       }),
     [week.startMs, week.endMs, visibleEntries],
   );
+
+  useEffect(() => {
+    if (!ready) {
+      setSheetOpen(false);
+      setCopyOpen(false);
+      setManagerOpen(false);
+      setDetailsOpen(false);
+      setActiveEntryId(null);
+      setDraftStartLocal(null);
+      setDraftEndLocal(null);
+    } else if (activeEntryId && !activeEntry) {
+      setSheetOpen(false);
+      setActiveEntryId(null);
+    }
+  }, [ready, activeEntryId, activeEntry]);
+
+  useEffect(() => {
+    if (catalog.ready && selectedCalendarKey !== "all" && !selectedCalendar) setSelectedCalendarKey("all");
+  }, [catalog.ready, selectedCalendarKey, selectedCalendar]);
+
+  useEffect(() => {
+    setCopyOpen(false);
+  }, [calendarPermissionsKey]);
 
   function toggleMember(uid: string) {
     setVisibleUids((current) => {
@@ -152,8 +192,9 @@ export function CalendarPage() {
   }
 
   function openEntry(entryId: string) {
-    const found = entries.find((item) => item.id === entryId);
-    if (found) setSelectedYmd(ymdInTz(found.startAt));
+    const found = entries.find((item) => calendarEntryKey(item) === entryId);
+    if (!found) return;
+    setSelectedYmd(ymdInTz(found.startAt));
     setDraftStartLocal(null);
     setDraftEndLocal(null);
     setActiveEntryId(entryId);
@@ -163,6 +204,21 @@ export function CalendarPage() {
   return (
     <div className="calendar-page">
       <h1 className="visually-hidden">Lịch nhóm</h1>
+
+      <div className="cal-catalog">
+        <label className="cal-catalog__select">
+          <span>Lịch đang xem</span>
+          <select className="form-input" value={selectedCalendar ? selectedCalendarKey : "all"} disabled={!catalog.ready} onChange={(event) => setSelectedCalendarKey(event.target.value)}>
+            <option value="all">Tất cả lịch của tôi</option>
+            {calendars.map((calendar) => <option key={calendarKey(calendar)} value={calendarKey(calendar)}>{calendar.name}</option>)}
+          </select>
+        </label>
+        <div className="cal-catalog__actions">
+          <Button variant="ghost" className="btn--sm" disabled={!canEdit} onClick={() => { setManagedCalendarKey(null); setManagerOpen(true); }}>Tạo lịch chia sẻ</Button>
+          {selectedCalendar?.kind === "shared" ? <Button variant="ghost" className="btn--sm" disabled={!canEdit} onClick={() => { setManagedCalendarKey(calendarKey(selectedCalendar)); setManagerOpen(true); }}>{canManageCalendar(selectedCalendar, myUid) ? "Quản lý lịch" : "Thông tin lịch"}</Button> : null}
+        </div>
+        {catalog.ready && selectedCalendar ? <CalendarAudience calendar={selectedCalendar} members={session.members} labelOf={labelOf} /> : null}
+      </div>
 
       <WeekToolbar
         bounds={week}
@@ -197,14 +253,16 @@ export function CalendarPage() {
         onToggleHours={() => setShowAllHours((open) => !open)}
       />
 
-      {live.error ? <LockBanner>{live.error}</LockBanner> : null}
+      <p className="cal-privacy-note">Chỉ hiển thị các lịch bạn được xem. Khoảng trống không có nghĩa là thành viên đang rảnh.</p>
+      {error ? <LockBanner>{error}</LockBanner> : null}
 
-      {!live.ready && !live.error ? <PageLoadingSkeleton stats={0} rows={4} /> : null}
+      {!ready && !error ? <><p className="form-hint" role="status">Đang xác nhận quyền truy cập và tải lịch…</p><PageLoadingSkeleton stats={0} rows={4} /></> : null}
 
-      {live.ready ? (
+      {ready ? (
         <WeekGrid
           week={week}
           entries={visibleEntries}
+          calendars={calendars}
           members={members}
           labelOf={labelOf}
           selectedYmd={selectedYmd}
@@ -220,7 +278,7 @@ export function CalendarPage() {
       ) : null}
 
       <BottomSheet
-        open={detailsOpen}
+        open={detailsOpen && ready}
         onClose={() => setDetailsOpen(false)}
         size="wide"
         title={`Chi tiết tuần · ${formatWeekRangeLabel(week)}`}
@@ -229,17 +287,20 @@ export function CalendarPage() {
           week={week}
           selectedYmd={selectedYmd}
           entries={visibleEntries}
+          calendars={calendars}
           members={members}
           visibleUids={activeUids}
           labelOf={labelOf}
-          ready={live.ready}
+          ready={ready}
           onOpenEntry={openEntry}
         />
       </BottomSheet>
 
-      {session.groupId && myUid ? (
+      {session.groupId && myUid && ready && defaultCalendar ? (
         <>
+          {sheetOpen && (!activeEntryId || activeEntry) ?
           <CalendarEntrySheet
+            key={`${activeEntryId || "new"}:${calendarPermissionsKey}`}
             open={sheetOpen}
             onClose={() => {
               setSheetOpen(false);
@@ -249,20 +310,37 @@ export function CalendarPage() {
             groupId={session.groupId}
             uid={myUid}
             weekEntries={entries}
+            calendars={calendars}
+            defaultCalendar={defaultCalendar}
+            members={members}
+            labelOf={labelOf}
             selectedYmd={selectedYmd}
             draftStartLocal={draftStartLocal}
             draftEndLocal={draftEndLocal}
             entry={activeEntry}
             canEdit={canEdit}
             onSaved={setSelectedYmd}
-          />
+          /> : null}
+          {copyOpen ?
           <CopyWeekSheet
+            key={calendarPermissionsKey}
             open={copyOpen}
             onClose={() => setCopyOpen(false)}
             groupId={session.groupId}
             uid={myUid}
+            calendars={copyCalendars}
             targetWeekStartYmd={week.startYmd}
-          />
+          /> : null}
+          {managerOpen && (!managedCalendarKey || managedCalendar) ? <CalendarManagerSheet
+            key={`${managedCalendarKey || "new"}:${calendarPermissionsKey}`}
+            open={managerOpen}
+            onClose={() => setManagerOpen(false)}
+            groupId={session.groupId}
+            uid={myUid}
+            members={members}
+            labelOf={labelOf}
+            calendar={managedCalendar}
+          /> : null}
         </>
       ) : null}
     </div>

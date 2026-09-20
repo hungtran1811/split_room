@@ -1,3 +1,5 @@
+import type { CalendarRef } from "../domain/calendar/types";
+
 export type ExpenseDoc = {
   id: string;
   date?: string;
@@ -73,6 +75,7 @@ export type NotificationDoc = {
 
 export type CalendarEntryDoc = {
   id: string;
+  calendar: CalendarRef;
   uid: string;
   title: string;
   description: string;

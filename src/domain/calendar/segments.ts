@@ -1,5 +1,6 @@
 import type { WeekBounds } from "./week";
 import type { CalendarEntry, DaySegment } from "./types";
+import { calendarEntryKey, GROUP_CALENDAR } from "./access";
 
 function clipInterval(
   startAt: number,
@@ -22,6 +23,8 @@ export function splitEntryAcrossDays(entry: CalendarEntry, week: WeekBounds): Da
     if (!clipped) continue;
     segments.push({
       entryId: entry.id,
+      entryKey: calendarEntryKey(entry),
+      calendar: entry.calendar || GROUP_CALENDAR,
       uid: entry.uid,
       title: entry.title,
       description: entry.description,

@@ -9,12 +9,15 @@ import {
   type CopyCandidate,
 } from "../../services/calendar.service";
 import { useToast } from "../../shared/ui/Toast";
+import type { CalendarInfo } from "../../domain/calendar/types";
+import { calendarName } from "./CalendarAudience";
 
 type CopyWeekSheetProps = {
   open: boolean;
   onClose: () => void;
   groupId: string;
   uid: string;
+  calendars: CalendarInfo[];
   targetWeekStartYmd: string;
 };
 
@@ -23,6 +26,7 @@ export function CopyWeekSheet({
   onClose,
   groupId,
   uid,
+  calendars,
   targetWeekStartYmd,
 }: CopyWeekSheetProps) {
   const { showToast } = useToast();
@@ -41,9 +45,10 @@ export function CopyWeekSheet({
     async function load() {
       setLoading(true);
       setError("");
+      setCandidates([]);
       setFailed([]);
       try {
-        const next = await previewCopyFromPreviousWeek(groupId, uid, targetWeekStartYmd);
+        const next = await previewCopyFromPreviousWeek(groupId, uid, calendars, targetWeekStartYmd);
         if (!cancelled) setCandidates(next);
       } catch (err) {
         if (!cancelled) {
@@ -59,16 +64,16 @@ export function CopyWeekSheet({
     return () => {
       cancelled = true;
     };
-  }, [open, groupId, uid, targetWeekStartYmd]);
+  }, [open, groupId, uid, calendars, targetWeekStartYmd]);
 
   async function runCopy(items: CopyCandidate[]) {
-    if (!items.length) return;
+    if (!items.length || copying) return;
     setCopying(true);
     setError("");
     try {
-      const result = await copyPreviousWeekEntries(groupId, uid, targetWeekStartYmd, items);
+      const result = await copyPreviousWeekEntries(groupId, uid, calendars, targetWeekStartYmd, items);
       const failedItems = items.filter((item) =>
-        result.failed.some((fail) => fail.destId === item.destId),
+        result.failed.some((fail) => fail.destKey === item.destKey),
       );
       setFailed(failedItems);
       showToast({
@@ -112,7 +117,7 @@ export function CopyWeekSheet({
     >
       <p className="form-hint">
         Lịch bận của bạn bắt đầu trong tuần {previousStart} sẽ được dịch +7 ngày. Lịch đã có ở tuần
-        này được giữ nguyên.
+        này được giữ nguyên. Chỉ sao chép sự kiện do bạn tạo và giữ nguyên lịch chứa sự kiện, cùng người xem.
       </p>
       {loading ? <p className="form-hint">Đang tải lịch tuần trước…</p> : null}
       {!loading && !candidates.length && !error ? (
@@ -120,11 +125,12 @@ export function CopyWeekSheet({
       ) : null}
       <ul className="cal-copy-list">
         {candidates.map((item) => (
-          <li key={item.destId}>
+          <li key={item.destKey}>
             <strong>{item.title}</strong>
             <span>
               {ymdInTz(item.startAt)} {formatHmFromMs(item.startAt)}–{formatHmFromMs(item.endAt)}
             </span>
+            <span>Lịch đích: {calendarName(item.calendar, calendars)}</span>
           </li>
         ))}
       </ul>

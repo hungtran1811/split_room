@@ -5,10 +5,12 @@ import {
   initializeTestEnvironment,
 } from "@firebase/rules-unit-testing";
 import fs from "node:fs";
+import { serverTimestamp } from "firebase/firestore";
 
 const OWNER_UID = "owner-uid";
 const ADMIN_UID = "admin-uid";
 const MEMBER_UID = "member-uid";
+const SECOND_MEMBER_UID = "second-member-uid";
 const OUTSIDER_UID = "outsider-uid";
 const OTHER_OWNER_UID = "other-owner-uid";
 const NEW_MEMBER_UID = "new-member-uid";
@@ -101,6 +103,50 @@ function authenticatedDb(uid) {
   }).firestore();
 }
 
+function calendarPayload(ownerUid, memberUids = [ownerUid, ownerUid === MEMBER_UID ? OWNER_UID : MEMBER_UID], kind = "shared") {
+  return {
+    name: kind === "private" ? "Ca nhan" : "Ke hoach A-B",
+    kind,
+    ownerUid,
+    memberUids,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  };
+}
+
+function calendarEntryPayload(uid, overrides = {}) {
+  return {
+    uid,
+    title: "Di hoc",
+    description: "Chi tiet lich",
+    location: "Nha",
+    startAt: new Date("2026-09-14T08:00:00+07:00"),
+    endAt: new Date("2026-09-14T10:00:00+07:00"),
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+    ...overrides,
+  };
+}
+
+function calendarPath(calendarId, groupId = GROUP_ID) {
+  return `groups/${groupId}/calendars/${calendarId}`;
+}
+
+async function createAudienceCalendars() {
+  await assertSucceeds(authenticatedDb(OWNER_UID).doc(calendarPath("shared-ab")).set(
+    calendarPayload(OWNER_UID, [OWNER_UID, MEMBER_UID]),
+  ));
+  await assertSucceeds(authenticatedDb(MEMBER_UID).doc(calendarPath(`private_${MEMBER_UID}`)).set(
+    calendarPayload(MEMBER_UID, [MEMBER_UID], "private"),
+  ));
+  await assertSucceeds(authenticatedDb(MEMBER_UID).doc(`${calendarPath("shared-ab")}/entries/from-b`).set(
+    calendarEntryPayload(MEMBER_UID),
+  ));
+  await assertSucceeds(authenticatedDb(MEMBER_UID).doc(`${calendarPath(`private_${MEMBER_UID}`)}/entries/personal`).set(
+    calendarEntryPayload(MEMBER_UID),
+  ));
+}
+
 async function seedGroup(groupId, members) {
   await testEnv.withSecurityRulesDisabled(async (context) => {
     const db = context.firestore();
@@ -151,6 +197,7 @@ describe("firestore rules", () => {
       memberPayload(OWNER_UID, "owner", "owner"),
       memberPayload(ADMIN_UID, "admin", "admin"),
       memberPayload(MEMBER_UID, "member", "member"),
+      memberPayload(SECOND_MEMBER_UID, "member", "second-member"),
     ]);
     await seedGroup(OTHER_GROUP_ID, [
       memberPayload(OTHER_OWNER_UID, "owner", "other-owner"),
@@ -700,6 +747,283 @@ describe("firestore rules", () => {
         .doc(`groups/${GROUP_ID}/members/${ADMIN_UID}`)
         .get();
       expect(snapshot.data().role).toBe("admin");
+    });
+  });
+
+  describe("calendar audiences", () => {
+    it("shows the common calendar to all four members and isolates private/shared calendars", async () => {
+      await createAudienceCalendars();
+      const commonPath = `groups/${GROUP_ID}/calendarEntries/common`;
+      await assertSucceeds(authenticatedDb(MEMBER_UID).doc(commonPath).set(calendarEntryPayload(MEMBER_UID)));
+
+      for (const uid of [OWNER_UID, MEMBER_UID, ADMIN_UID, SECOND_MEMBER_UID]) {
+        const db = authenticatedDb(uid);
+        await assertSucceeds(db.doc(commonPath).get());
+        const sharedParent = db.doc(calendarPath("shared-ab"));
+        const sharedEntry = db.doc(`${calendarPath("shared-ab")}/entries/from-b`);
+        const personalParent = db.doc(calendarPath(`private_${MEMBER_UID}`));
+        const personalEntry = db.doc(`${calendarPath(`private_${MEMBER_UID}`)}/entries/personal`);
+
+        if ([OWNER_UID, MEMBER_UID].includes(uid)) {
+          await assertSucceeds(sharedParent.get());
+          await assertSucceeds(sharedEntry.get());
+        } else {
+          await assertFails(sharedParent.get());
+          await assertFails(sharedEntry.get());
+        }
+        if (uid === MEMBER_UID) {
+          await assertSucceeds(personalParent.get());
+          await assertSucceeds(personalEntry.get());
+        } else {
+          await assertFails(personalParent.get());
+          await assertFails(personalEntry.get());
+        }
+      }
+    });
+
+    it("requires audience-filtered parent queries and supports weekly entry overlap queries", async () => {
+      await createAudienceCalendars();
+      const db = authenticatedDb(MEMBER_UID);
+      const calendars = db.collection(`groups/${GROUP_ID}/calendars`);
+      const visible = await assertSucceeds(calendars.where("memberUids", "array-contains", MEMBER_UID).get());
+      expect(visible.docs.map((item) => item.id).sort()).toEqual([`private_${MEMBER_UID}`, "shared-ab"].sort());
+      await assertFails(calendars.get());
+      await assertFails(calendars.where("memberUids", "array-contains", OWNER_UID).get());
+
+      const empty = await assertSucceeds(authenticatedDb(SECOND_MEMBER_UID)
+        .collection(`groups/${GROUP_ID}/calendars`)
+        .where("memberUids", "array-contains", SECOND_MEMBER_UID).get());
+      expect(empty.empty).toBe(true);
+
+      const weekQuery = (client) => client.collection(`${calendarPath("shared-ab")}/entries`)
+        .where("endAt", ">", new Date("2026-09-14T00:00:00+07:00"))
+        .where("startAt", "<", new Date("2026-09-21T00:00:00+07:00"))
+        .orderBy("endAt", "asc").orderBy("startAt", "asc");
+      expect((await assertSucceeds(weekQuery(db).get())).size).toBe(1);
+      await assertFails(weekQuery(authenticatedDb(ADMIN_UID)).get());
+    });
+
+    it("denies anonymous, outside-group, and cross-group access even with known IDs", async () => {
+      await createAudienceCalendars();
+      for (const db of [testEnv.unauthenticatedContext().firestore(), authenticatedDb(OUTSIDER_UID), authenticatedDb(OTHER_OWNER_UID)]) {
+        await assertFails(db.doc(calendarPath("shared-ab")).get());
+        await assertFails(db.doc(`${calendarPath("shared-ab")}/entries/from-b`).get());
+        await assertFails(db.doc(calendarPath(`private_${MEMBER_UID}`)).get());
+        await assertFails(db.collection(`groups/${GROUP_ID}/calendars`).get());
+      }
+      const memberDb = authenticatedDb(MEMBER_UID);
+      await assertFails(memberDb.doc(calendarPath("forged", OTHER_GROUP_ID)).set(calendarPayload(MEMBER_UID)));
+      await assertFails(memberDb.doc(`${calendarPath("shared-ab")}/entries/spoof`).set(calendarEntryPayload(OWNER_UID)));
+      await assertFails(authenticatedDb(OUTSIDER_UID).doc(`${calendarPath("shared-ab")}/entries/outside`).set(calendarEntryPayload(OUTSIDER_UID)));
+    });
+
+    it("bootstraps only the requester's deterministic private calendar and prevents ID squatting", async () => {
+      const db = authenticatedDb(MEMBER_UID);
+      const ref = db.doc(calendarPath(`private_${MEMBER_UID}`));
+      await assertSucceeds(db.runTransaction(async (tx) => {
+        const current = await tx.get(ref);
+        expect(current.exists).toBe(false);
+        tx.set(ref, calendarPayload(MEMBER_UID, [MEMBER_UID], "private"));
+      }));
+      await assertSucceeds(ref.get());
+      await assertFails(db.doc(calendarPath(`private_${ADMIN_UID}`)).get());
+      await assertFails(db.doc(calendarPath("unknown-shared")).get());
+      await assertFails(authenticatedDb(OUTSIDER_UID).doc(calendarPath(`private_${OUTSIDER_UID}`)).get());
+      await assertFails(db.doc(calendarPath(`private_${ADMIN_UID}`)).set(calendarPayload(MEMBER_UID)));
+      await assertFails(db.doc(calendarPath("wrong-private-id")).set(calendarPayload(MEMBER_UID, [MEMBER_UID], "private")));
+      await assertFails(db.doc(calendarPath(`private_${OWNER_UID}`)).set(calendarPayload(OWNER_UID, [OWNER_UID], "private")));
+      await assertFails(ref.update({ name: "Rename", updatedAt: serverTimestamp() }));
+      await assertFails(ref.update({ memberUids: [MEMBER_UID, OWNER_UID], updatedAt: serverTimestamp() }));
+      await assertFails(ref.delete());
+    });
+
+    it("rejects malformed calendars, forged ownership, and client-supplied creation timestamps", async () => {
+      const db = authenticatedDb(MEMBER_UID);
+      const invalid = [
+        { ownerUid: OWNER_UID, memberUids: [OWNER_UID, MEMBER_UID] },
+        { memberUids: [OWNER_UID] },
+        { memberUids: [MEMBER_UID, MEMBER_UID] },
+        { memberUids: [] },
+        { memberUids: MEMBER_UID },
+        { name: "" },
+        { name: "x".repeat(81) },
+        { kind: "public" },
+        { unexpected: true },
+        { createdAt: new Date("2020-01-01") },
+        { updatedAt: new Date("2020-01-01") },
+      ];
+      for (const [index, overrides] of invalid.entries()) {
+        await assertFails(db.doc(calendarPath(`invalid-${index}`)).set({ ...calendarPayload(MEMBER_UID), ...overrides }));
+      }
+      await assertFails(db.doc(calendarPath(`private_${MEMBER_UID}`)).set(
+        calendarPayload(MEMBER_UID, [MEMBER_UID, OWNER_UID], "private"),
+      ));
+      await assertFails(authenticatedDb(OUTSIDER_UID).doc(calendarPath("outside-parent")).set(calendarPayload(OUTSIDER_UID)));
+    });
+
+    it("lets only the shared-calendar owner manage audience while preventing transfer, conversion, and deletion", async () => {
+      const path = calendarPath("member-owned");
+      const memberRef = authenticatedDb(MEMBER_UID).doc(path);
+      await assertSucceeds(memberRef.set(calendarPayload(MEMBER_UID, [MEMBER_UID, OWNER_UID, ADMIN_UID])));
+      await assertSucceeds(memberRef.update({ name: "Renamed", memberUids: [MEMBER_UID, OWNER_UID], updatedAt: serverTimestamp() }));
+      for (const uid of [OWNER_UID, ADMIN_UID]) {
+        const otherRef = authenticatedDb(uid).doc(path);
+        await assertFails(otherRef.update({ name: "Hijacked", updatedAt: serverTimestamp() }));
+        await assertFails(otherRef.update({ memberUids: [uid], updatedAt: serverTimestamp() }));
+        await assertFails(otherRef.delete());
+      }
+      for (const overrides of [
+        { ownerUid: OWNER_UID },
+        { kind: "private" },
+        { memberUids: [OWNER_UID] },
+        { createdAt: new Date("2020-01-01") },
+        { updatedAt: new Date("2020-01-01") },
+      ]) {
+        await assertFails(memberRef.update({ updatedAt: serverTimestamp(), ...overrides }));
+      }
+      await assertFails(memberRef.delete());
+    });
+
+    it("allows event changes only by the author and keeps event identity and timestamps valid", async () => {
+      await createAudienceCalendars();
+      const path = `${calendarPath("shared-ab")}/entries/from-b`;
+      const authorRef = authenticatedDb(MEMBER_UID).doc(path);
+      await assertSucceeds(authorRef.update({ title: "Updated", updatedAt: serverTimestamp() }));
+      const ownerRef = authenticatedDb(OWNER_UID).doc(path);
+      await assertFails(ownerRef.update({ title: "Owner override", updatedAt: serverTimestamp() }));
+      await assertFails(ownerRef.delete());
+      await assertFails(authenticatedDb(ADMIN_UID).doc(path).update({ title: "Admin override", updatedAt: serverTimestamp() }));
+
+      for (const overrides of [
+        { uid: OWNER_UID },
+        { createdAt: new Date("2020-01-01") },
+        { updatedAt: new Date("2020-01-01") },
+        { title: "" },
+        { title: "x".repeat(121) },
+        { endAt: new Date("2020-01-01") },
+        { unexpected: "data" },
+      ]) {
+        await assertFails(authorRef.update({ updatedAt: serverTimestamp(), ...overrides }));
+      }
+      await assertFails(authenticatedDb(MEMBER_UID).doc(`${calendarPath("shared-ab")}/entries/old-timestamp`).set(
+        calendarEntryPayload(MEMBER_UID, { createdAt: new Date("2020-01-01") }),
+      ));
+      await assertSucceeds(authorRef.delete());
+    });
+
+    it("applies audience changes to historical entries and revokes the removed author's access", async () => {
+      await createAudienceCalendars();
+      const parentRef = authenticatedDb(OWNER_UID).doc(calendarPath("shared-ab"));
+      const entryPath = `${calendarPath("shared-ab")}/entries/from-b`;
+      await assertFails(authenticatedDb(ADMIN_UID).doc(entryPath).get());
+      await assertSucceeds(parentRef.update({ memberUids: [OWNER_UID, MEMBER_UID, ADMIN_UID], updatedAt: serverTimestamp() }));
+      await assertSucceeds(authenticatedDb(ADMIN_UID).doc(entryPath).get());
+      await assertSucceeds(authenticatedDb(ADMIN_UID).doc(`${calendarPath("shared-ab")}/entries/from-c`).set(calendarEntryPayload(ADMIN_UID)));
+      await assertSucceeds(parentRef.update({ memberUids: [OWNER_UID, ADMIN_UID], updatedAt: serverTimestamp() }));
+
+      const removedDb = authenticatedDb(MEMBER_UID);
+      await assertFails(removedDb.doc(calendarPath("shared-ab")).get());
+      await assertFails(removedDb.doc(entryPath).get());
+      await assertFails(removedDb.doc(entryPath).update({ title: "No access", updatedAt: serverTimestamp() }));
+      await assertFails(removedDb.doc(entryPath).delete());
+      await assertFails(removedDb.doc(`${calendarPath("shared-ab")}/entries/new`).set(calendarEntryPayload(MEMBER_UID)));
+      await assertFails(removedDb.doc(calendarPath("shared-ab")).update({ memberUids: [OWNER_UID, MEMBER_UID], updatedAt: serverTimestamp() }));
+      const remaining = await assertSucceeds(removedDb.collection(`groups/${GROUP_ID}/calendars`)
+        .where("memberUids", "array-contains", MEMBER_UID).get());
+      expect(remaining.docs.map((item) => item.id)).toEqual([`private_${MEMBER_UID}`]);
+      expect((await assertSucceeds(authenticatedDb(OWNER_UID).doc(entryPath).get())).data().uid).toBe(MEMBER_UID);
+    });
+
+    it("requires current group membership even when the UID remains in the stored audience", async () => {
+      await createAudienceCalendars();
+      const removedDb = authenticatedDb(MEMBER_UID);
+      await assertSucceeds(authenticatedDb(OWNER_UID).doc(`groups/${GROUP_ID}/members/${MEMBER_UID}`).delete());
+      for (const id of ["shared-ab", `private_${MEMBER_UID}`]) {
+        await assertFails(removedDb.doc(calendarPath(id)).get());
+        await assertFails(removedDb.collection(`${calendarPath(id)}/entries`).get());
+        await assertFails(removedDb.doc(`${calendarPath(id)}/entries/new`).set(calendarEntryPayload(MEMBER_UID)));
+      }
+      await assertFails(removedDb.collection(`groups/${GROUP_ID}/calendars`)
+        .where("memberUids", "array-contains", MEMBER_UID).get());
+      await assertFails(removedDb.doc(`${calendarPath("shared-ab")}/entries/from-b`).delete());
+      await assertFails(removedDb.doc(calendarPath("new-shared")).set(calendarPayload(MEMBER_UID)));
+      await assertSucceeds(authenticatedDb(OWNER_UID).doc(`${calendarPath("shared-ab")}/entries/from-b`).get());
+
+      await assertSucceeds(authenticatedDb(OWNER_UID).doc(calendarPath("shared-ab")).update({
+        memberUids: [OWNER_UID, OUTSIDER_UID], updatedAt: serverTimestamp(),
+      }));
+      await assertFails(authenticatedDb(OUTSIDER_UID).doc(calendarPath("shared-ab")).get());
+      await assertFails(authenticatedDb(OUTSIDER_UID).doc(`${calendarPath("shared-ab")}/entries/from-b`).get());
+    });
+
+    it("permits create-if-absent entry copy transactions only within an accessible calendar", async () => {
+      await createAudienceCalendars();
+      const db = authenticatedDb(MEMBER_UID);
+      const ref = db.doc(`${calendarPath("shared-ab")}/entries/copied-next-week`);
+      const copy = () => db.runTransaction(async (tx) => {
+        const existing = await tx.get(ref);
+        if (existing.exists) return "skipped";
+        tx.set(ref, calendarEntryPayload(MEMBER_UID, {
+          startAt: new Date("2026-09-21T22:00:00+07:00"),
+          endAt: new Date("2026-09-22T02:00:00+07:00"),
+        }));
+        return "added";
+      });
+      expect(await assertSucceeds(copy())).toBe("added");
+      expect(await assertSucceeds(copy())).toBe("skipped");
+      await assertSucceeds(db.doc(`${calendarPath(`private_${MEMBER_UID}`)}/entries/not-created-yet`).get());
+      await assertFails(authenticatedDb(ADMIN_UID).doc(`${calendarPath("shared-ab")}/entries/not-created-yet`).get());
+      await assertFails(db.doc(`${calendarPath("unknown")}/entries/not-created-yet`).get());
+    });
+
+    it("moves an authored event between common and private calendars atomically", async () => {
+      await createAudienceCalendars();
+      const db = authenticatedDb(MEMBER_UID);
+      const commonRef = db.doc(`groups/${GROUP_ID}/calendarEntries/movable`);
+      const privateRef = db.doc(`${calendarPath(`private_${MEMBER_UID}`)}/entries/movable`);
+      await assertSucceeds(commonRef.set(calendarEntryPayload(MEMBER_UID)));
+
+      const intoPrivate = db.batch();
+      intoPrivate.set(privateRef, calendarEntryPayload(MEMBER_UID));
+      intoPrivate.delete(commonRef);
+      await assertSucceeds(intoPrivate.commit());
+      expect((await assertSucceeds(commonRef.get())).exists).toBe(false);
+      expect((await assertSucceeds(privateRef.get())).exists).toBe(true);
+      await assertFails(authenticatedDb(OWNER_UID).doc(privateRef.path).get());
+
+      const intoCommon = db.batch();
+      intoCommon.set(commonRef, calendarEntryPayload(MEMBER_UID));
+      intoCommon.delete(privateRef);
+      await assertSucceeds(intoCommon.commit());
+      expect((await assertSucceeds(privateRef.get())).exists).toBe(false);
+      expect((await assertSucceeds(authenticatedDb(OWNER_UID).doc(commonRef.path).get())).exists).toBe(true);
+    });
+
+    it("rejects an entire move when the destination is inaccessible or the source belongs to someone else", async () => {
+      await createAudienceCalendars();
+      const db = authenticatedDb(MEMBER_UID);
+      const commonRef = db.doc(`groups/${GROUP_ID}/calendarEntries/stays-common`);
+      await assertSucceeds(commonRef.set(calendarEntryPayload(MEMBER_UID)));
+      await assertSucceeds(authenticatedDb(ADMIN_UID).doc(calendarPath(`private_${ADMIN_UID}`)).set(
+        calendarPayload(ADMIN_UID, [ADMIN_UID], "private"),
+      ));
+
+      const invalidDestination = db.batch();
+      invalidDestination.set(db.doc(`${calendarPath(`private_${ADMIN_UID}`)}/entries/denied`), calendarEntryPayload(MEMBER_UID));
+      invalidDestination.delete(commonRef);
+      await assertFails(invalidDestination.commit());
+      expect((await assertSucceeds(commonRef.get())).exists).toBe(true);
+      expect((await assertSucceeds(authenticatedDb(ADMIN_UID)
+        .doc(`${calendarPath(`private_${ADMIN_UID}`)}/entries/denied`).get())).exists).toBe(false);
+
+      const ownerDb = authenticatedDb(OWNER_UID);
+      const forgedDestination = ownerDb.doc(`groups/${GROUP_ID}/calendarEntries/forged-move`);
+      const invalidSource = ownerDb.batch();
+      invalidSource.set(forgedDestination, calendarEntryPayload(OWNER_UID));
+      invalidSource.delete(ownerDb.doc(`${calendarPath("shared-ab")}/entries/from-b`));
+      await assertFails(invalidSource.commit());
+      expect((await assertSucceeds(forgedDestination.get())).exists).toBe(false);
+      expect((await assertSucceeds(ownerDb.doc(`${calendarPath("shared-ab")}/entries/from-b`).get())).exists).toBe(true);
     });
   });
 });
