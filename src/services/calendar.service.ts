@@ -1,5 +1,5 @@
 import {
-  collection, deleteDoc, doc, getDocsFromServer, onSnapshot, orderBy, query,
+  collection, deleteDoc, doc, getDocFromServer, getDocsFromServer, onSnapshot, orderBy, query,
   runTransaction, serverTimestamp, setDoc, Timestamp, updateDoc, where,
   type Firestore, type Unsubscribe,
 } from "firebase/firestore";
@@ -9,6 +9,11 @@ import { addDaysYmd } from "../domain/calendar/tz";
 import { weekBounds } from "../domain/calendar/week";
 import { buildCopiedEntries } from "../domain/calendar/copyWeek";
 import { calendarEntryKey, calendarKey } from "../domain/calendar/access";
+import {
+  buildCalendarDeletePreview, isCalendarDeleteScope, matchesCalendarDeletion,
+  MAX_CALENDAR_DELETIONS, sameCalendarDeletionEntry,
+  type CalendarDeletePreview, type CalendarDeleteScope,
+} from "../domain/calendar/delete";
 import { validateCalendarEntryInput, type CalendarEntryInput } from "../domain/calendar/validate";
 import type { CalendarEntry, CalendarInfo, CalendarRef, CopyWeekResult } from "../domain/calendar/types";
 import type { CalendarEntryDoc } from "../types/models";
@@ -179,6 +184,116 @@ export async function deleteCalendarEntry(
     await deleteDoc(entryRef(groupId, calendar, entryId));
   } catch (error) {
     throw wrapFirestoreError(error, "Không xóa được lịch bận.");
+  }
+}
+
+class CalendarDeletionError extends Error {}
+
+function requireDeletionCalendar(calendar: CalendarRef) {
+  if (!calendar || !["group", "private", "shared"].includes(calendar.kind)
+    || typeof calendar.id !== "string" || !calendar.id || calendar.id.includes("/")
+    || (calendar.kind === "group" && calendar.id !== "group")) {
+    throw new CalendarDeletionError("Lịch cần xóa không hợp lệ.");
+  }
+}
+
+function requireDeletionEntry(entry: CalendarEntry, calendar: CalendarRef, uid: string) {
+  if (!entry || typeof entry.id !== "string" || !entry.id || entry.id.includes("/")
+    || !entry.calendar || calendarKey(entry.calendar) !== calendarKey(calendar)
+    || entry.uid !== uid || !uid
+    || typeof entry.title !== "string" || typeof entry.description !== "string"
+    || typeof entry.location !== "string" || !Number.isFinite(entry.startAt)
+    || !Number.isFinite(entry.endAt) || entry.endAt <= entry.startAt) {
+    throw new CalendarDeletionError("Chỉ có thể xóa lịch bận do bạn tạo trong lịch đang chọn.");
+  }
+}
+
+function requireDeletionLimit(count: number) {
+  if (count > MAX_CALENDAR_DELETIONS) {
+    throw new CalendarDeletionError(
+      `Có hơn ${MAX_CALENDAR_DELETIONS} lịch bận trùng khớp. Hãy chọn phạm vi theo tuần hoặc xóa từng lịch; chưa có lịch nào bị xóa.`,
+    );
+  }
+}
+
+function deletionError(error: unknown, fallback: string): Error {
+  return error instanceof CalendarDeletionError ? error : wrapFirestoreError(error, fallback);
+}
+
+/** Always confirm access and current content with the server before displaying a delete plan. */
+export async function previewCalendarDeletion(
+  groupId: string, calendar: CalendarRef, uid: string, entryId: string, scope: CalendarDeleteScope,
+): Promise<CalendarDeletePreview> {
+  try {
+    requireDeletionCalendar(calendar);
+    if (!isCalendarDeleteScope(scope) || !uid || typeof entryId !== "string"
+      || !entryId || entryId.includes("/")) {
+      throw new CalendarDeletionError("Phạm vi xóa lịch bận không hợp lệ.");
+    }
+    const snapshot = await getDocFromServer(entryRef(groupId, calendar, entryId));
+    if (!snapshot.exists()) {
+      throw new CalendarDeletionError("Lịch bận không còn tồn tại. Hãy đóng và mở lại lịch.");
+    }
+    const anchor = mapEntry(snapshot.id, calendar, snapshot.data());
+    requireDeletionEntry(anchor, calendar, uid);
+    if (scope === "one") return buildCalendarDeletePreview(anchor, [], scope);
+
+    // A single-field equality uses Firestore's automatic index. Never scan other calendars.
+    const future = await getDocsFromServer(query(entriesCol(groupId, calendar), where("uid", "==", uid)));
+    const preview = buildCalendarDeletePreview(anchor,
+      future.docs.map((item) => mapEntry(item.id, calendar, item.data())), scope);
+    requireDeletionLimit(preview.entries.length);
+    return preview;
+  } catch (error) {
+    throw deletionError(error, "Không tải được danh sách lịch bận cần xóa. Hãy thử lại.");
+  }
+}
+
+/** Delete exactly the reviewed records, or none if any record or permission has changed. */
+export async function deleteCalendarEntries(
+  groupId: string, calendar: CalendarRef, uid: string, preview: CalendarDeletePreview,
+): Promise<number> {
+  try {
+    requireDeletionCalendar(calendar);
+    if (!preview || !isCalendarDeleteScope(preview.scope)
+      || !Array.isArray(preview.entries) || !preview.entries.length) {
+      throw new CalendarDeletionError("Bản xem trước không hợp lệ. Hãy tải lại danh sách cần xóa.");
+    }
+    requireDeletionLimit(preview.entries.length);
+    requireDeletionEntry(preview.anchor, calendar, uid);
+    const selected = new Set<string>();
+    let includesAnchor = false;
+    for (const entry of preview.entries) {
+      requireDeletionEntry(entry, calendar, uid);
+      if (selected.has(entry.id) || !matchesCalendarDeletion(preview.anchor, entry, preview.scope)) {
+        throw new CalendarDeletionError("Bản xem trước không còn phù hợp. Hãy tải lại danh sách cần xóa.");
+      }
+      selected.add(entry.id);
+      if (sameCalendarDeletionEntry(preview.anchor, entry)) includesAnchor = true;
+    }
+    if (!includesAnchor) {
+      throw new CalendarDeletionError("Bản xem trước thiếu lịch đang chọn. Hãy tải lại danh sách cần xóa.");
+    }
+
+    // Capture immutable values so the caller cannot change the selection during the transaction.
+    const reviewed = preview.entries.map((entry) => ({ ...entry, calendar: { ...entry.calendar } }));
+    await runTransaction(requireDb(), async (transaction) => {
+      const refs = reviewed.map((entry) => entryRef(groupId, calendar, entry.id));
+      const snapshots = await Promise.all(refs.map((ref) => transaction.get(ref)));
+      for (let index = 0; index < snapshots.length; index += 1) {
+        const snapshot = snapshots[index];
+        if (!snapshot.exists()
+          || !sameCalendarDeletionEntry(reviewed[index], mapEntry(snapshot.id, calendar, snapshot.data()))) {
+          throw new CalendarDeletionError(
+            "Một lịch bận đã thay đổi hoặc bị xóa. Hãy tải lại danh sách trước khi xác nhận; chưa có lịch nào bị xóa.",
+          );
+        }
+      }
+      for (const ref of refs) transaction.delete(ref);
+    });
+    return reviewed.length;
+  } catch (error) {
+    throw deletionError(error, "Không xóa được lịch bận. Chưa có lịch nào bị xóa; hãy thử lại.");
   }
 }
 

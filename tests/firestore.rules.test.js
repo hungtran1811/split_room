@@ -751,6 +751,60 @@ describe("firestore rules", () => {
   });
 
   describe("calendar audiences", () => {
+    it.each(["group", "private", "shared"])("allows an author's atomic multi-event deletion in the %s calendar", async (kind) => {
+      await createAudienceCalendars();
+      const path = kind === "group" ? `groups/${GROUP_ID}/calendarEntries`
+        : `${calendarPath(kind === "private" ? `private_${MEMBER_UID}` : "shared-ab")}/entries`;
+      const ids = Array.from({ length: 14 }, (_, index) => `delete-following-${index}`);
+      await testEnv.withSecurityRulesDisabled(async (context) => {
+        const db = context.firestore();
+        const batch = db.batch();
+        for (const id of ids) batch.set(db.doc(`${path}/${id}`), calendarEntryPayload(MEMBER_UID));
+        await batch.commit();
+      });
+      const db = authenticatedDb(MEMBER_UID);
+      const ownEntries = await assertSucceeds(db.collection(path).where("uid", "==", MEMBER_UID).get());
+      expect(ownEntries.docs.filter((entry) => ids.includes(entry.id))).toHaveLength(14);
+      await assertSucceeds(db.runTransaction(async (transaction) => {
+        const refs = ids.map((id) => db.doc(`${path}/${id}`));
+        const snapshots = await Promise.all(refs.map((ref) => transaction.get(ref)));
+        expect(snapshots.every((snapshot) => snapshot.data().uid === MEMBER_UID)).toBe(true);
+        refs.forEach((ref) => transaction.delete(ref));
+      }));
+      await testEnv.withSecurityRulesDisabled(async (context) => {
+        const snapshots = await Promise.all(ids.map((id) => context.firestore().doc(`${path}/${id}`).get()));
+        expect(snapshots.every((snapshot) => !snapshot.exists)).toBe(true);
+      });
+    });
+
+    it("rejects the entire multi-event deletion if any event belongs to someone else", async () => {
+      await createAudienceCalendars();
+      const path = `${calendarPath("shared-ab")}/entries`;
+      const db = authenticatedDb(OWNER_UID);
+      await db.doc(`${path}/from-a`).set(calendarEntryPayload(OWNER_UID));
+      await assertFails(db.runTransaction(async (transaction) => {
+        const refs = [db.doc(`${path}/from-a`), db.doc(`${path}/from-b`)];
+        await Promise.all(refs.map((ref) => transaction.get(ref)));
+        refs.forEach((ref) => transaction.delete(ref));
+      }));
+      expect((await db.doc(`${path}/from-a`).get()).exists).toBe(true);
+      expect((await db.doc(`${path}/from-b`).get()).exists).toBe(true);
+    });
+
+    it("keeps previously previewed events when the author loses calendar access before deletion", async () => {
+      await createAudienceCalendars();
+      const ownerDb = authenticatedDb(OWNER_UID);
+      const memberDb = authenticatedDb(MEMBER_UID);
+      const path = `${calendarPath("shared-ab")}/entries/from-b`;
+      await assertSucceeds(memberDb.doc(path).get());
+      await ownerDb.doc(calendarPath("shared-ab")).update({ memberUids: [OWNER_UID], updatedAt: serverTimestamp() });
+      await assertFails(memberDb.runTransaction(async (transaction) => {
+        await transaction.get(memberDb.doc(path));
+        transaction.delete(memberDb.doc(path));
+      }));
+      expect((await ownerDb.doc(path).get()).exists).toBe(true);
+    });
+
     it("shows the common calendar to all four members and isolates private/shared calendars", async () => {
       await createAudienceCalendars();
       const commonPath = `groups/${GROUP_ID}/calendarEntries/common`;

@@ -14,6 +14,20 @@ Mỗi người có một lịch Cá nhân. Lịch chung dùng danh sách thành 
 
 Chuyển sự kiện chỉ dành cho tác giả, và được thực hiện nguyên tử: thành công cả thêm ở đích và xóa ở nguồn, hoặc không thay đổi gì. Lặp/sao chép tuần giữ lịch chứa sự kiện. Xóa cả lịch và chuyển quyền chủ lịch chưa được hỗ trợ.
 
+## Xóa một hoặc nhiều lịch bận
+
+Trong chi tiết sự kiện do mình tạo, chọn **Xóa** rồi chọn phạm vi:
+
+- **Chỉ lần này**: xóa sự kiện đang mở, gồm cả phần qua đêm.
+- **Lần này và các ngày kế tiếp**: gồm lần đang chọn và các sự kiện về sau có cùng giờ bắt đầu, thời lượng, tên, mô tả và địa điểm.
+- **Lần này và các tuần kế tiếp**: điều kiện như trên, đồng thời cùng thứ trong tuần.
+
+Chỉ tìm trong cùng lịch và các sự kiện do chính bạn tạo. Các lần trước ngày đang chọn, lịch của người khác và sự kiện ở lịch khác được giữ nguyên. Dữ liệu hiện tại không có mã chuỗi lặp, nên phạm vi được xác định bằng nội dung đã lưu; các sự kiện tạo riêng nhưng trùng đầy đủ điều kiện cũng có thể được liệt kê. Hãy kiểm tra danh sách ngày giờ và số lượng trước khi xác nhận.
+
+Bản xem trước lấy từ máy chủ, gồm cả các tuần chưa mở trên giao diện. Khi xác nhận, ứng dụng đọc lại từng sự kiện trong một transaction: nếu có sự kiện đã thay đổi, bị xóa hoặc mất quyền, toàn bộ thao tác dừng để bạn tải lại danh sách. Chỉ xóa các sự kiện đã xuất hiện trong bản xem trước; sự kiện mới được thêm sau đó không bị xóa. Mỗi thao tác tối đa 450 sự kiện để đảm bảo xóa đồng thời; nếu vượt giới hạn, chọn một lần bắt đầu muộn hơn hoặc phạm vi theo tuần.
+
+Tính năng dùng truy vấn một trường `uid` và quyền xóa hiện có, không cần thêm index, đổi Rules hoặc migration dữ liệu.
+
 ## Lưu trữ và truy cập
 
 - `groups/{groupId}/calendarEntries/{entryId}` tiếp tục là lịch Cả nhóm. Dữ liệu cũ không cần migration.
