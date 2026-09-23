@@ -1373,3 +1373,111 @@ html.calendar-lock body {
   overflow: hidden;
   overscroll-behavior: none;
 }
+
+.cal-delete {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.cal-delete p {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.cal-delete__subject {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow-wrap: anywhere;
+}
+
+.cal-delete__subject span,
+.cal-delete__explanation,
+.cal-delete__warning {
+  color: var(--ink-muted);
+  font-size: var(--text-sm);
+}
+
+.cal-delete__scopes {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+}
+
+.cal-delete__scopes legend {
+  padding: 0 0 8px;
+  font-weight: 600;
+}
+
+.cal-delete__scopes label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.cal-delete__scopes label.is-selected {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.cal-delete__scopes input {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.cal-delete__count {
+  font-weight: 600;
+}
+
+.cal-delete__list {
+  margin: 8px 0 0;
+  padding: 0;
+  max-height: min(240px, 30dvh);
+  overflow-y: auto;
+  list-style: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.cal-delete__list li {
+  padding: 10px 12px;
+  overflow-wrap: anywhere;
+  font-size: var(--text-sm);
+}
+
+.cal-delete__list li + li {
+  border-top: 1px solid var(--border);
+}
+
+.cal-delete__warning {
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+}
+
+.cal-delete__error {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.cal-delete__actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  width: 100%;
+}

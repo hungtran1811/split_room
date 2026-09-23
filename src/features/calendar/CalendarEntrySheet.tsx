@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { BottomSheet } from "../../shared/ui/BottomSheet";
 import { Button } from "../../shared/ui/Button";
-import { ConfirmDialog } from "../../shared/ui/ConfirmDialog";
 import {
   hasSelfOverlap,
   TITLE_MAX,
@@ -31,9 +30,9 @@ import type { CalendarEntry, CalendarInfo, CalendarRef } from "../../domain/cale
 import { calendarEntryKey, calendarKey, canEditCalendarEntry } from "../../domain/calendar/access";
 import type { MemberProfile } from "../../core/roles";
 import { CalendarAudience } from "./CalendarAudience";
+import { CalendarDeleteDialog } from "./CalendarDeleteDialog";
 import {
   createCalendarEntries,
-  deleteCalendarEntry,
   updateCalendarEntry,
   moveCalendarEntry,
 } from "../../services/calendar.service";
@@ -308,22 +307,6 @@ export function CalendarEntrySheet({
     }
   }
 
-  async function handleDelete() {
-    if (!entry || !isOwner) return;
-    setSaving(true);
-    try {
-      await deleteCalendarEntry(groupId, entry.calendar, entry.id);
-      showToast({ title: "Đã xóa", message: "Đã xóa lịch bận.", variant: "success" });
-      setConfirmDelete(false);
-      onClose();
-    } catch (err) {
-      setError((err as { message?: string }).message || "Không xóa được lịch.");
-      setConfirmDelete(false);
-    } finally {
-      setSaving(false);
-    }
-  }
-
   return (
     <>
       <BottomSheet
@@ -506,16 +489,19 @@ export function CalendarEntrySheet({
         </div>
       </BottomSheet>
 
-      <div className="cal-confirm"><ConfirmDialog
-        open={confirmDelete && open}
-        title="Xóa lịch bận?"
-        description="Thao tác này xóa toàn bộ lịch, kể cả phần qua đêm."
-        confirmLabel="Xóa"
-        confirmVariant="danger"
-        pending={saving}
+      {confirmDelete && open && entry && editable ? <CalendarDeleteDialog
+        key={draftKey}
+        groupId={groupId}
+        uid={uid}
+        entry={entry}
+        calendarName={calendars.find((calendar) => calendarKey(calendar) === calendarKey(entry.calendar))?.name || "Lịch đã chọn"}
         onCancel={() => setConfirmDelete(false)}
-        onConfirm={() => void handleDelete()}
-      /></div>
+        onDeleted={(count) => {
+          showToast({ title: "Đã xóa", message: `Đã xóa ${count} lịch bận.`, variant: "success" });
+          setConfirmDelete(false);
+          onClose();
+        }}
+      /> : null}
     </>
   );
 }

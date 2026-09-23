@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const actions = vi.hoisted(() => ({ create: vi.fn(), update: vi.fn(), move: vi.fn(), events: vi.fn(), toast: vi.fn() }));
 vi.mock("../src/services/calendar-catalog.service", () => ({ createSharedCalendar: actions.create, updateSharedCalendar: actions.update }));
-vi.mock("../src/services/calendar.service", () => ({ createCalendarEntries: actions.events, updateCalendarEntry: vi.fn(), deleteCalendarEntry: vi.fn(), moveCalendarEntry: actions.move }));
+vi.mock("../src/services/calendar.service", () => ({ createCalendarEntries: actions.events, updateCalendarEntry: vi.fn(), deleteCalendarEntry: vi.fn(), moveCalendarEntry: actions.move, previewCalendarDeletion: vi.fn(), deleteCalendarEntries: vi.fn() }));
 vi.mock("../src/shared/ui/MemberAvatar", () => ({ MemberAvatar: () => null }));
 vi.mock("../src/shared/ui/Toast", () => ({ useToast: () => ({ showToast: actions.toast }) }));
 import { CalendarManagerSheet } from "../src/features/calendar/CalendarManagerSheet";
